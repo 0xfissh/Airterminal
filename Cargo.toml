@@ -1,0 +1,68 @@
+[package]
+name = "AirTerminal"
+version = "0.3.0"
+edition = "2024"
+categories = ["finance", "visualization", "gui"]
+
+[package.metadata.bundle]
+name = "AirTerminal"
+identifier = "com.airterminal.app"
+icon = ["icons/app_icon.icns"]
+version = "0.3.0"
+copyright = "Copyright (c) 2024-2025 AirTerminal. All rights reserved."
+category = "Finance"
+short_description = "High Frequency Analysis Platform"
+osx_url_schemes = ["airterminal"]
+windows_url_schemes = ["airterminal"]
+linux_url_schemes = ["airterminal"]
+
+[workspace]
+members = [ "data", "exchange", "supabase"]
+
+[workspace.dependencies]
+iced_futures = { version = "0.14.0-dev" }
+iced_core = { version = "0.14.0-dev", features = ["serde"] }
+chrono = { version = "0.4.40", default-features = false, features = ["serde", "now", "clock"] }
+serde = { version = "1.0.219", default-features = false, features = ["derive"] }
+serde_json = "1.0.140"
+log = "0.4.22"
+thiserror = "2.0.12"
+ordered-float = "5.0.0"
+regex = "1.11.1"
+rust_decimal = "1.36.0"
+palette = "0.7.6"
+num-traits = "0.2.19"
+uuid = { version = "1.11.0", features = ["v4"] }
+
+[dependencies]
+iced = { version = "0.14.0-dev", default-features = false, features = [
+    "wgpu",
+    "lazy",
+    "tokio", 
+    "canvas",
+    "sipper",
+    "advanced",
+    "unconditional-rendering",
+] }
+iced_core.workspace = true
+iced_futures.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+ordered-float.workspace = true
+log.workspace = true
+uuid.workspace = true
+palette.workspace = true
+num-traits.workspace = true
+fern = "0.7.1"
+open = "5.0"
+
+exchange = { version = "0.1.0", path = "exchange" }
+data = { version = "0.1.0", path = "data" }
+supabase = { version = "0.3.0", path = "supabase" }
+
+[patch.crates-io]
+iced = { git = "https://github.com/iced-rs/iced", rev = "9d56b488cc08b7365fb1839ed47ef92f3ff0fa36" }
+iced_futures = { git = "https://github.com/iced-rs/iced", rev = "9d56b488cc08b7365fb1839ed47ef92f3ff0fa36" }
+iced_core = { git = "https://github.com/iced-rs/iced", rev = "9d56b488cc08b7365fb1839ed47ef92f3ff0fa36"}

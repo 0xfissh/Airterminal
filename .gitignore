@@ -1,0 +1,11 @@
+.DS_Store
+/target
+/.vscode
+*.log
+.env
+*.zip
+
+/supabase
+/scripts
+build.rs
+version.json
