@@ -9,6 +9,9 @@ mod style;
 mod widget;
 mod window;
 
+// Import rustls for crypto provider initialization
+use rustls::crypto::ring;
+
 use data::config::theme::{default_theme, redshift_theme};
 use data::{layout::WindowSpec, sidebar};
 use modal::{LayoutManager, ThemeEditor, audio};
@@ -37,6 +40,9 @@ use std::{
 use supabase::{AuthState, SupabaseClientWrapper, SupabaseError, TrialStatus, SubscriptionCheckResult};
 
 fn main() {
+    // Initialize rustls crypto provider
+    ring::default_provider().install_default().expect("Failed to install rustls crypto provider");
+
     logger::setup(cfg!(debug_assertions)).expect("Failed to initialize logger");
 
     std::thread::spawn(data::cleanup_old_market_data);

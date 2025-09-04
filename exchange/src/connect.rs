@@ -11,8 +11,9 @@ use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 use tokio_rustls::{
     TlsConnector,
-    rustls::{ClientConfig, OwnedTrustAnchor},
+    rustls::{ClientConfig, RootCertStore},
 };
+use rustls::pki_types::ServerName;
 
 #[allow(clippy::large_enum_variant)]
 pub enum State {
@@ -33,18 +34,15 @@ where
 }
 
 pub fn tls_connector() -> Result<TlsConnector, StreamError> {
-    let mut root_store = tokio_rustls::rustls::RootCertStore::empty();
+    let mut root_store = RootCertStore::empty();
 
-    root_store.add_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|ta| {
-        OwnedTrustAnchor::from_subject_spki_name_constraints(
-            ta.subject,
-            ta.spki,
-            ta.name_constraints,
-        )
-    }));
+    root_store.extend(
+        webpki_roots::TLS_SERVER_ROOTS
+            .iter()
+            .cloned()
+    );
 
     let config = ClientConfig::builder()
-        .with_safe_defaults()
         .with_root_certificates(root_store)
         .with_no_client_auth();
 
@@ -63,11 +61,11 @@ pub async fn setup_tls_connection(
     tcp_stream: TcpStream,
 ) -> Result<tokio_rustls::client::TlsStream<TcpStream>, StreamError> {
     let tls_connector: TlsConnector = tls_connector()?;
-    let domain: tokio_rustls::rustls::ServerName =
-        tokio_rustls::rustls::ServerName::try_from(domain)
+    let server_name: ServerName =
+        ServerName::try_from(domain.to_string())
             .map_err(|_| StreamError::ParseError("invalid dnsname".to_string()))?;
     tls_connector
-        .connect(domain, tcp_stream)
+        .connect(server_name, tcp_stream)
         .await
         .map_err(|e| StreamError::WebsocketError(e.to_string()))
 }
