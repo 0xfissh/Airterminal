@@ -17,6 +17,7 @@ pub fn stack<'a, Message>(
 where
     Message: Clone + 'a,
 {
+    // Draw the overlay on top of everything (pane + margins)
     iced::widget::stack![
         base.into(),
         mouse_area(

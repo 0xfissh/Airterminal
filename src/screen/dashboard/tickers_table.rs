@@ -20,8 +20,10 @@ use iced::{
 const ACTIVE_UPDATE_INTERVAL: u64 = 25;
 const INACTIVE_UPDATE_INTERVAL: u64 = 300;
 
-const TICKER_CARD_HEIGHT: f32 = 64.0;
-const SEARCH_BAR_HEIGHT: f32 = 120.0;
+// Compact browser layout
+const BROWSER_WIDTH: f32 = 360.0;
+const TICKER_CARD_HEIGHT: f32 = 28.0;
+const SEARCH_BAR_HEIGHT: f32 = 64.0;
 
 // Enhanced virtualization constants
 const VISIBLE_BUFFER: f32 = 1.5; // Render 1.5 screens worth of content
@@ -855,10 +857,9 @@ impl TickersTable {
         };
 
         let search_bar_row = row![
-            text_input("Search for a ticker...", &self.normalized_search)
+            text_input("Search all markets", &self.normalized_search)
                 .style(style::search_input)
                 .on_input(|value| {
-                    // Filter out "/" character to prevent it from being entered in search
                     let filtered_value = value.replace("/", "");
                     Message::UpdateSearchQuery(filtered_value)
                 })
@@ -866,7 +867,8 @@ impl TickersTable {
             sorting_button
         ]
         .align_y(Vertical::Center)
-        .spacing(4);
+        .spacing(4)
+        .height(Length::Fixed(SEARCH_BAR_HEIGHT));
 
         let sort_options_column = {
             // Only show market filters for exchanges that support them
@@ -1026,10 +1028,10 @@ impl TickersTable {
             .spacing(4)
         };
 
-        let mut content = column![search_bar_row,]
+        let mut content = column![search_bar_row]
             .spacing(8)
-            .padding(padding::right(8))
-            .width(Length::Fill);
+            .padding(padding::right(4).left(4))
+            .width(Length::Fixed(BROWSER_WIDTH));
 
         if self.show_sort_options {
             content = content.push(sort_options_column);
@@ -1060,14 +1062,26 @@ impl TickersTable {
 
         content = content.push(ticker_cards);
 
-        scrollable::Scrollable::with_direction(
-            content,
-            scrollable::Direction::Vertical(
-                scrollable::Scrollbar::new().width(8).scroller_width(6),
-            ),
+        container(
+            scrollable::Scrollable::with_direction(
+                content,
+                scrollable::Direction::Vertical(
+                    scrollable::Scrollbar::new().width(8).scroller_width(6),
+                ),
+            )
+            .on_scroll(Message::Scrolled)
+            .style(style::scroll_bar)
         )
-        .on_scroll(Message::Scrolled)
-        .style(style::scroll_bar)
+        .width(Length::Fixed(BROWSER_WIDTH))
+        .height(Length::Fill)
+        .style(|theme: &Theme| {
+            let palette = theme.extended_palette();
+            iced::widget::container::Style {
+                background: Some(iced::Background::Color(palette.background.base.color.scale_alpha(0.95))),
+                text_color: Some(palette.background.base.text),
+                ..Default::default()
+            }
+        })
         .into()
     }
 

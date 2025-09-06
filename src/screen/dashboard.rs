@@ -25,7 +25,7 @@ use iced::{
     Element, Length, Subscription, Task, Vector,
     task::{Straw, sipper},
     widget::{
-        PaneGrid, center, container,
+        PaneGrid, center, container, row, button, responsive,
         pane_grid::{self, Configuration},
     },
 };
@@ -41,6 +41,12 @@ pub enum Message {
     Notification(Toast),
     LayoutFetchAll,
     RefreshStreams,
+    // Right-panel control & routing
+    OpenTickerBrowser,
+    OpenPaneSettings(window::Id, pane_grid::Pane),
+    CloseRightPanel,
+    TickerBrowser(tickers_table::Message),
+    ChangePaneChartType(window::Id, pane_grid::Pane, String),
     ChartRequestedFetch {
         window: window::Id,
         pane: pane_grid::Pane,
@@ -60,6 +66,8 @@ pub struct Dashboard {
     pub focus: Option<(window::Id, pane_grid::Pane)>,
     pub popout: HashMap<window::Id, (pane_grid::State<pane::State>, WindowSpec)>,
     pub streams: UniqueStreams,
+    right_panel: RightPanel,
+    active_ticker_browser: Option<(window::Id, pane_grid::Pane)>,
 }
 
 impl Default for Dashboard {
@@ -69,6 +77,8 @@ impl Default for Dashboard {
             focus: None,
             streams: UniqueStreams::default(),
             popout: HashMap::new(),
+            right_panel: RightPanel::Closed,
+            active_ticker_browser: None,
         }
     }
 }
@@ -82,6 +92,13 @@ pub enum Event {
         data: FetchedData,
         stream: StreamKind,
     },
+}
+
+// Right-side panel hosting either the Ticker Browser or per-pane Settings
+enum RightPanel {
+    Closed,
+    TickerBrowser(tickers_table::TickersTable),
+    Settings { window: window::Id, pane: pane_grid::Pane },
 }
 
 impl Dashboard {
@@ -129,6 +146,8 @@ impl Dashboard {
             focus: None,
             streams: UniqueStreams::default(),
             popout,
+            right_panel: RightPanel::Closed,
+            active_ticker_browser: None,
         }
     }
 
@@ -195,8 +214,63 @@ impl Dashboard {
                     );
                 }
             },
+            Message::OpenTickerBrowser => {
+                let (table, task) = tickers_table::TickersTable::new(vec![]);
+                self.right_panel = RightPanel::TickerBrowser(table);
+                return (task.map(Message::TickerBrowser), None);
+            }
+            Message::OpenPaneSettings(window, pane) => {
+                self.right_panel = RightPanel::Settings { window, pane };
+            }
+            Message::CloseRightPanel => {
+                self.right_panel = RightPanel::Closed;
+            }
+            Message::TickerBrowser(msg) => {
+                if let RightPanel::TickerBrowser(ref mut table) = self.right_panel {
+                    match table.update(msg) {
+                        Some(tickers_table::Action::TickerSelected(ti, ex, content)) => {
+                            let task = self.init_pane_task(main_window.id, ti, ex, &content);
+                            return (task, None);
+                        }
+                        Some(tickers_table::Action::Fetch(task)) => {
+                            return (task.map(Message::TickerBrowser), None);
+                        }
+                        Some(tickers_table::Action::ErrorOccurred(err)) => {
+                            return (Task::done(Message::Notification(Toast::error(err.to_string()))), None);
+                        }
+                        None => {}
+                    }
+                }
+            }
             Message::Pane(window, message) => {
                 match message {
+                    pane::Message::TickerBrowser(pane, msg) => {
+                        if let Some(pane_state) = self.get_mut_pane(main_window.id, window, pane) {
+                            if let Some(table) = pane_state.ticker_browser.as_mut() {
+                                match table.update(msg) {
+                                    Some(tickers_table::Action::TickerSelected(ti, ex, content)) => {
+                                        // Close the browser but keep StreamModifier open
+                                        pane_state.ticker_browser = None;
+                                        pane_state.modal = None;
+                                        self.active_ticker_browser = None;
+                                        let task = self.init_pane_task(main_window.id, ti, ex, &content);
+                                        return (task, None);
+                                    }
+                                    Some(tickers_table::Action::Fetch(task)) => {
+                                        let target_pane = pane;
+                                        return (
+                                            task.map(move |m| Message::Pane(window, pane::Message::TickerBrowser(target_pane, m))),
+                                            None,
+                                        );
+                                    }
+                                    Some(tickers_table::Action::ErrorOccurred(err)) => {
+                                        return (Task::done(Message::Notification(Toast::error(err.to_string()))), None);
+                                    }
+                                    None => {}
+                                }
+                            }
+                        }
+                    }
                     pane::Message::PaneClicked(pane) => {
                         self.focus = Some((window, pane));
                     }
@@ -253,10 +327,47 @@ impl Dashboard {
 
                         return (Task::done(Message::RefreshStreams), None);
                     }
+                    pane::Message::OpenSettingsPanel(pane) => {
+                        self.right_panel = RightPanel::Settings { window, pane };
+                    }
+                    pane::Message::OpenTickerBrowser(pane) => {
+                        // Close any active browser before opening a new one
+                        if let Some((w, p)) = self.active_ticker_browser.take() {
+                            if let Some(ps) = self.get_mut_pane(main_window.id, w, p) {
+                                ps.modal = None;
+                            }
+                        }
+
+                        if let Some(state) = self.get_mut_pane(main_window.id, window, pane) {
+                            if state.ticker_browser.is_none() {
+                                let (table, task) = tickers_table::TickersTable::new(vec![]);
+                                state.ticker_browser = Some(table);
+                                let target_pane = pane;
+                                if let Some(ps) = self.get_mut_pane(main_window.id, window, pane) {
+                                    ps.modal = Some(pane::Modal::TickerBrowser);
+                                }
+                                self.active_ticker_browser = Some((window, pane));
+                                return (
+                                    task.map(move |m| Message::Pane(window, pane::Message::TickerBrowser(target_pane, m))),
+                                    None,
+                                );
+                            } else {
+                                if let Some(ps) = self.get_mut_pane(main_window.id, window, pane) {
+                                    ps.modal = Some(pane::Modal::TickerBrowser);
+                                }
+                                self.active_ticker_browser = Some((window, pane));
+                            }
+                        }
+                    }
+                    // Allow changing chart type from settings panel
+                    // This is triggered via Dashboard::ChangePaneChartType messages
                     pane::Message::ToggleModal(pane, modal_type) => {
                         if let Some(pane) = self.get_mut_pane(main_window.id, window, pane) {
                             if Some(modal_type) == pane.modal {
                                 pane.modal = None;
+                                if matches!(modal_type, pane::Modal::TickerBrowser) {
+                                    self.active_ticker_browser = None;
+                                }
                             } else {
                                 pane.modal = Some(modal_type);
                             }
@@ -479,6 +590,16 @@ impl Dashboard {
                             if let pane::Content::Kline(chart, _) = &mut pane_state.content {
                                 chart.update_study_configurator(msg);
                             }
+                        }
+                    }
+                }
+            }
+            Message::ChangePaneChartType(window, pane, content) => {
+                if let Some(pane_state) = self.get_mut_pane(main_window.id, window, pane) {
+                    if let Some((_ex, _ticker)) = pane_state.stream_pair() {
+                        if let Some(ti) = pane_state.settings.ticker_info {
+                            let task = self.init_pane_task(main_window.id, ti, ti.exchange(), &content);
+                            return (task, None);
                         }
                     }
                 }
@@ -847,8 +968,79 @@ impl Dashboard {
         .spacing(6)
         .style(style::pane_grid)
         .into();
+    
+        let right_view: Option<Element<'_, Message>> = match &self.right_panel {
+            RightPanel::Closed => None,
+            RightPanel::TickerBrowser(table) => {
+                let close_btn = button(crate::style::icon_text(crate::style::Icon::Close, 12))
+                    .on_press(Message::CloseRightPanel)
+                    .style(|theme, status| crate::style::button::transparent(theme, status, false));
 
-        pane_grid.map(move |message| Message::Pane(main_window.id, message))
+                let content = responsive(move |size| table.view(size).map(Message::TickerBrowser));
+
+                let col = iced::widget::column![
+                    iced::widget::row![close_btn].spacing(4),
+                    content,
+                ]
+                .spacing(8);
+
+                Some(container(col).width(Length::Fixed(320.0)).into())
+            }
+            RightPanel::Settings { window, pane } => {
+                let settings_el: Option<Element<'_, Message>> = if let Some(state) = self.get_pane(main_window.id, *window, *pane) {
+                    match &state.content {
+                        pane::Content::Heatmap(chart, _) => {
+                            let el = crate::modal::pane::settings::heatmap_cfg_view(chart.visual_config(), *pane)
+                                .map(move |m| Message::Pane(*window, m));
+                            Some(el)
+                        }
+                        pane::Content::Kline(chart, _) => {
+                            let el = crate::modal::pane::settings::kline_cfg_view(
+                                chart.study_configurator(),
+                                chart.kind(),
+                                *pane,
+                            )
+                            .map(move |m| Message::Pane(*window, m));
+                            Some(el)
+                        }
+                        pane::Content::TimeAndSales(panel) => {
+                            let el = crate::modal::pane::settings::timesales_cfg_view(panel.config, *pane)
+                                .map(move |m| Message::Pane(*window, m));
+                            Some(el)
+                        }
+                        pane::Content::Starter => None,
+                    }
+                } else { None };
+
+                let close_btn = button(crate::style::icon_text(crate::style::Icon::Close, 12))
+                    .on_press(Message::CloseRightPanel)
+                    .style(|theme, status| crate::style::button::transparent(theme, status, false));
+
+                let col = if let Some(content) = settings_el {
+                    iced::widget::column![iced::widget::row![close_btn].spacing(4), content]
+                        .spacing(8)
+                } else {
+                    iced::widget::column![
+                        iced::widget::row![close_btn].spacing(4),
+                        iced::widget::text("No settings available").size(14),
+                    ]
+                    .spacing(8)
+                };
+
+                Some(container(col).width(Length::Fixed(320.0)).into())
+            }
+        };
+
+        if let Some(right) = right_view {
+            row![
+                pane_grid.map(move |message| Message::Pane(main_window.id, message)),
+                right,
+            ]
+            .spacing(8)
+            .into()
+        } else {
+            pane_grid.map(move |message| Message::Pane(main_window.id, message))
+        }
     }
 
     pub fn view_window<'a>(
@@ -858,26 +1050,28 @@ impl Dashboard {
         timezone: UserTimezone,
     ) -> Element<'a, Message> {
         if let Some((state, _)) = self.popout.get(&window) {
-            let content = container(
-                PaneGrid::new(state, |id, pane, _maximized| {
-                    let is_focused = self.focus == Some((window, id));
-                    pane.view(
-                        id,
-                        state.len(),
-                        is_focused,
-                        false,
-                        window,
-                        main_window,
-                        timezone,
-                    )
-                })
-                .on_click(pane::Message::PaneClicked),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(8);
+            let pane_grid: Element<_> = PaneGrid::new(state, |id, pane, _maximized| {
+                let is_focused = self.focus == Some((window, id));
+                pane.view(
+                    id,
+                    state.len(),
+                    is_focused,
+                    false,
+                    window,
+                    main_window,
+                    timezone,
+                )
+            })
+            .on_click(pane::Message::PaneClicked)
+            .into();
 
-            Element::new(content).map(move |message| Message::Pane(window, message))
+            let base = container(pane_grid)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(8);
+
+            // Let pane-level view handle any overlays (e.g., TickerBrowser) to avoid duplication
+            Element::new(base).map(move |message| Message::Pane(window, message))
         } else {
             Element::new(center("No pane found for window"))
                 .map(move |message| Message::Pane(window, message))

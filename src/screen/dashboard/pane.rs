@@ -10,6 +10,7 @@ use crate::{
     widget::{self, button_with_tooltip, column_drag, toast::Toast},
     window::{self, Window},
 };
+use super::tickers_table;
 use data::{
     UserTimezone,
     chart::{
@@ -26,7 +27,7 @@ use iced::{
     Alignment, Element, Length, Renderer, Task, Theme,
     alignment::Vertical,
     padding,
-    widget::{button, center, pane_grid, row, text, tooltip},
+    widget::{button, center, pane_grid, row, text, tooltip, container, responsive},
 };
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -51,6 +52,7 @@ pub enum Modal {
     StreamModifier,
     Settings,
     Indicators,
+    TickerBrowser,
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +67,10 @@ pub enum Message {
     Restore,
     TicksizeSelected(TickMultiplier, pane_grid::Pane),
     BasisSelected(Basis, pane_grid::Pane),
+    // Open right-side panels
+    OpenTickerBrowser(pane_grid::Pane),
+    OpenSettingsPanel(pane_grid::Pane),
+    TickerBrowser(pane_grid::Pane, super::tickers_table::Message),
     ToggleModal(pane_grid::Pane, Modal),
     InitPaneContent(String, Option<pane_grid::Pane>, Vec<StreamKind>, TickerInfo),
     ReplacePane(pane_grid::Pane),
@@ -91,6 +97,7 @@ pub struct State {
     pub notifications: Vec<Toast>,
     pub streams: Vec<StreamKind>,
     pub status: Status,
+    pub ticker_browser: Option<tickers_table::TickersTable>,
 }
 
 impl State {
@@ -344,11 +351,22 @@ impl State {
                 }
             };
 
-            stream_info_element = stream_info_element.push(
-                row![exchange_info, text(ticker_str).size(14),]
+            // Make the entire ticker pill (icon + text) a rounded button to open browser
+            let ticker_button = button(
+                row![exchange_info, text(ticker_str).size(14)]
                     .align_y(Vertical::Center)
-                    .spacing(4),
+                    .spacing(6),
+            )
+            .style(|theme, status| style::button::modifier(theme, status, true))
+            .on_press(
+                if self.modal == Some(Modal::TickerBrowser) {
+                    Message::ToggleModal(id, Modal::TickerBrowser)
+                } else {
+                    Message::OpenTickerBrowser(id)
+                }
             );
+
+            stream_info_element = stream_info_element.push(ticker_button);
         }
 
         let is_stream_modifier = self
@@ -462,12 +480,14 @@ impl State {
         if !matches!(&self.content, Content::Starter) {
             buttons = buttons.push(button_with_tooltip(
                 icon_text(Icon::Cog, 12),
-                Message::ToggleModal(pane, Modal::Settings),
+                Message::OpenSettingsPanel(pane),
                 None,
                 tooltip_pos,
                 modal_btn_style(Modal::Settings),
             ));
         }
+
+        // Search moved to the title (ticker area); remove old control button
 
         if matches!(&self.content, Content::Heatmap(_, _) | Content::Kline(_, _)) {
             buttons = buttons.push(button_with_tooltip(
@@ -636,6 +656,7 @@ impl Default for State {
             streams: vec![],
             notifications: vec![],
             status: Status::Ready,
+            ticker_browser: None,
         }
     }
 }
@@ -897,17 +918,40 @@ impl Content {
 
                 let settings_view = || timesales_cfg_view(panel.config, pane);
 
+                let base_with_toasts = widget::toast::Manager::new(base, &state.notifications, Alignment::End, move |idx| {
+                    Message::DeleteNotification(pane, idx)
+                }).into();
+
                 match state.modal {
+                    Some(Modal::TickerBrowser) => {
+                        if let Some(table) = state.ticker_browser.as_ref() {
+                            let content = container(responsive(move |size| {
+                                table.view(size).map(move |m| {
+                                    Message::TickerBrowser(pane, m)
+                                })
+                            }))
+                            .width(Length::Fixed(360.0))
+                            .height(Length::Fill);
+
+                            stack(
+                                base_with_toasts,
+                                content,
+                                Message::ToggleModal(pane, Modal::TickerBrowser),
+                                padding::left(36),
+                                Alignment::Start,
+                            )
+                        } else {
+                            base_with_toasts
+                        }
+                    }
                     Some(Modal::Settings) => stack(
-                        base,
+                        base_with_toasts,
                         settings_view(),
                         Message::ToggleModal(pane, Modal::Settings),
                         padding::right(12).left(12),
                         Alignment::End,
                     ),
-                    _ => widget::toast::Manager::new(base, &state.notifications, Alignment::End, move |idx| {
-                        Message::DeleteNotification(pane, idx)
-                    }).into(),
+                    _ => base_with_toasts,
                 }
             }
             Content::Heatmap(chart, indicators) => {
@@ -1002,13 +1046,37 @@ where
         .into();
 
     match state.modal {
-        Some(Modal::StreamModifier) => stack(
-            base,
-            modal::stream::view(pane, stream_modifier, state.stream_pair()),
-            Message::ToggleModal(pane, Modal::StreamModifier),
-            padding::left(36),
-            Alignment::Start,
-        ),
+        Some(Modal::TickerBrowser) => {
+            if let Some(table) = state.ticker_browser.as_ref() {
+                let content = container(responsive(move |size| {
+                    table.view(size).map(move |m| {
+                        Message::TickerBrowser(pane, m)
+                    })
+                }))
+                .width(Length::Fixed(360.0))
+                .height(Length::Fill);
+
+                stack(
+                    base,
+                    content,
+                    Message::ToggleModal(pane, Modal::TickerBrowser),
+                    padding::left(36),
+                    Alignment::Start,
+                )
+            } else {
+                base
+            }
+        }
+        Some(Modal::StreamModifier) => {
+            // Only show StreamModifier by itself
+            stack(
+                base,
+                modal::stream::view(pane, stream_modifier, state.stream_pair()),
+                Message::ToggleModal(pane, Modal::StreamModifier),
+                padding::left(36),
+                Alignment::Start,
+            )
+        }
         Some(Modal::Indicators) => stack(
             base,
             modal::indicators::view(pane, state, indicators),
@@ -1016,13 +1084,44 @@ where
             padding::right(12).left(12),
             Alignment::End,
         ),
-        Some(Modal::Settings) => stack(
-            base,
-            settings_view(),
-            Message::ToggleModal(pane, Modal::Settings),
-            padding::right(12).left(12),
-            Alignment::End,
-        ),
+        Some(Modal::Settings) => {
+            // Enriched settings: include chart-type selector & ticker quick switch inline
+            let current_kind = state.content.chart_kind();
+            let mut header_row = iced::widget::row![];
+
+            // Chart type quick toggle
+            if let Some(kind) = current_kind {
+                let to_footprint = iced::widget::button(iced::widget::text("Footprint"))
+                    .on_press(Message::InitPaneContent(
+                        "footprint".to_string(),
+                        Some(pane),
+                        state.streams.clone(),
+                        state.settings.ticker_info.unwrap(),
+                    ));
+                let to_candles = iced::widget::button(iced::widget::text("Candles"))
+                    .on_press(Message::InitPaneContent(
+                        "candlestick".to_string(),
+                        Some(pane),
+                        state.streams.clone(),
+                        state.settings.ticker_info.unwrap(),
+                    ));
+
+                header_row = match kind {
+                    data::chart::KlineChartKind::Footprint { .. } => header_row.push(to_candles),
+                    data::chart::KlineChartKind::Candles => header_row.push(to_footprint),
+                };
+            }
+
+            let content = iced::widget::column![header_row, settings_view()].spacing(8);
+
+            stack(
+                base,
+                content,
+                Message::ToggleModal(pane, Modal::Settings),
+                padding::right(12).left(12),
+                Alignment::End,
+            )
+        }
         None => base,
     }
 }

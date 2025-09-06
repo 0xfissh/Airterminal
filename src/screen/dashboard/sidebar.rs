@@ -9,7 +9,7 @@ use data::sidebar;
 
 use iced::{
     Alignment, Element, Length, Subscription, Task,
-    widget::{responsive, text_input},
+    widget::{text_input},
     widget::{Space, column, row},
 };
 
@@ -96,26 +96,11 @@ impl Sidebar {
             TooltipPosition::Left
         };
 
-        let is_table_open = self.tickers_table.is_open();
+        let nav_buttons = self.nav_buttons(audio_volume, tooltip_position);
 
-        let nav_buttons = self.nav_buttons(is_table_open, audio_volume, tooltip_position);
-
-        let tickers_table = if is_table_open {
-            column![responsive(move |size| self
-                .tickers_table
-                .view(size)
-                .map(Message::TickersTable))]
-            .width(200)
-        } else {
-            column![]
-        };
-
-        match state.position {
-            sidebar::Position::Left => row![nav_buttons, tickers_table],
-            sidebar::Position::Right => row![tickers_table, nav_buttons],
-        }
-        .spacing(if is_table_open { 8 } else { 4 })
-        .into()
+        row![nav_buttons]
+            .spacing(4)
+            .into()
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
@@ -124,7 +109,6 @@ impl Sidebar {
 
     fn nav_buttons(
         &self,
-        is_table_open: bool,
         audio_volume: Option<f32>,
         tooltip_position: TooltipPosition,
     ) -> iced::widget::Column<'_, Message> {
@@ -154,20 +138,6 @@ impl Sidebar {
                 None,
                 tooltip_position,
                 move |theme, status| crate::style::button::transparent(theme, status, is_active),
-            )
-        };
-
-        let ticker_search_button = {
-            button_with_tooltip(
-                icon_text(Icon::Search, 14)
-                    .width(24)
-                    .align_x(Alignment::Center),
-                Message::TickersTable(super::tickers_table::Message::ToggleTable),
-                None,
-                tooltip_position,
-                move |theme, status| {
-                    crate::style::button::transparent(theme, status, is_table_open)
-                },
             )
         };
 
@@ -204,7 +174,6 @@ impl Sidebar {
         };
 
         column![
-            ticker_search_button,
             layout_modal_button,
             audio_btn,
             Space::with_height(Length::Fill),
