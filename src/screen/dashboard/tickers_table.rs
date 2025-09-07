@@ -8,7 +8,7 @@ use exchange::{
 };
 use iced::{
     Alignment, Element, Length, Renderer, Size, Subscription, Task, Theme,
-    alignment::{self, Horizontal, Vertical},
+    alignment::{Horizontal, Vertical},
     padding,
     widget::{
         Button, Space, Text, button, column, container, horizontal_rule, row,
@@ -21,8 +21,8 @@ const ACTIVE_UPDATE_INTERVAL: u64 = 25;
 const INACTIVE_UPDATE_INTERVAL: u64 = 300;
 
 // Compact browser layout
-const BROWSER_WIDTH: f32 = 360.0;
-const TICKER_CARD_HEIGHT: f32 = 28.0;
+const BROWSER_WIDTH: f32 = 412.0;
+const TICKER_CARD_HEIGHT: f32 = 33.6; // ~20% taller than 28.0
 const SEARCH_BAR_HEIGHT: f32 = 64.0;
 
 // Enhanced virtualization constants
@@ -556,10 +556,10 @@ impl TickersTable {
                 .style(style::ticker_card)
                 .into()
             } else {
-                create_ticker_card_with_focus(exchange, ticker, display_data.clone(), is_focused)
+                create_ticker_card_with_focus(exchange, ticker, display_data.clone(), is_focused, is_fav)
             }
         } else {
-            create_ticker_card_with_focus(exchange, ticker, display_data, is_focused)
+            create_ticker_card_with_focus(exchange, ticker, display_data, is_focused, is_fav)
         }
     }
 
@@ -1077,7 +1077,7 @@ impl TickersTable {
         .style(|theme: &Theme| {
             let palette = theme.extended_palette();
             iced::widget::container::Style {
-                background: Some(iced::Background::Color(palette.background.base.color.scale_alpha(0.95))),
+                background: Some(iced::Background::Color(palette.background.base.color.scale_alpha(0.98))),
                 text_color: Some(palette.background.base.text),
                 ..Default::default()
             }
@@ -1108,74 +1108,80 @@ fn create_ticker_card_with_focus(
     ticker: &Ticker,
     display_data: TickerDisplayData,
     is_focused: bool,
+    is_fav: bool,
 ) -> Element<'static, Message> {
-    let color_column = container(column![])
-        .height(Length::Fill)
-        .width(Length::Fixed(2.0))
-        .style({
-            let alpha = display_data.card_color_alpha;
-            move |theme| style::ticker_card_bar(theme, alpha)
-        });
+    // Left clickable area: icon + ticker name + volume
+    let left_click_area = button(
+        row![
+            match exchange {
+                Exchange::BybitInverse
+                | Exchange::BybitLinear
+                | Exchange::BybitSpot => icon_text(Icon::BybitLogo, 12),
+                Exchange::BinanceInverse
+                | Exchange::BinanceLinear
+                | Exchange::BinanceSpot => icon_text(Icon::BinanceLogo, 12),
+                Exchange::HyperliquidPerps => icon_text(Icon::HyperliquidLogo, 10),
+            },
+            Space::new(Length::Fixed(6.0), Length::Shrink),
+            text(display_data.display_ticker.clone()).style(move |theme: &Theme| {
+                // Dynamic color: fully white for low magnitude, ramps to strong color as magnitude increases
+                let palette = theme.extended_palette();
+                let magnitude = display_data.card_color_alpha.abs().clamp(0.0, 1.0);
+                let strong = if display_data.card_color_alpha >= 0.0 {
+                    palette.success.strong.color
+                } else {
+                    palette.danger.strong.color
+                };
+                let white = iced::Color::from_rgb(1.0, 1.0, 1.0);
+                let lerp = |a: iced::Color, b: iced::Color, t: f32| iced::Color {
+                    r: a.r + (b.r - a.r) * t,
+                    g: a.g + (b.g - a.g) * t,
+                    b: a.b + (b.b - a.b) * t,
+                    a: a.a + (b.a - a.a) * t,
+                };
+                // Keep text pure white up to threshold, then ramp to strong color
+                let threshold = 0.2;
+                let t = if magnitude <= threshold { 0.0 } else { ((magnitude - threshold) / (1.0 - threshold)).clamp(0.0, 1.0) };
+                let mut st = iced::widget::text::Style::default();
+                st.color = Some(lerp(white, strong, t));
+                st
+            }),
+            Space::new(Length::Fill, Length::Shrink),
+            text(display_data.volume_display.clone()),
+        ]
+        .align_y(Alignment::Center)
+        .spacing(4),
+    )
+    .style(|theme, status| style::button::transparent(theme, status, false))
+    .on_press(Message::ExpandTickerCard(Some((*ticker, exchange))));
 
-    // Add focus indicator styling
-    let focus_style = if is_focused {
-        |theme: &iced::Theme, status: iced::widget::button::Status| {
-            let mut base = style::button::ticker_card(theme, status);
-            // Add focus ring effect
+    let fav_button = button(if is_fav { icon_text(Icon::StarFilled, 12) } else { icon_text(Icon::Star, 12) })
+        .style(|theme, status| style::button::transparent(theme, status, false))
+        .on_press(Message::FavoriteTicker(exchange, *ticker));
+
+    let focused = is_focused;
+    container(
+        row![
+            left_click_area.width(Length::Fill),
+            Space::new(Length::Fixed(0.0), Length::Shrink),
+            fav_button,
+        ]
+        .align_y(Alignment::Center)
+        .spacing(2)
+        .padding(padding::left(8).right(6).top(4).bottom(4)),
+    )
+    .style(move |theme: &Theme| {
+        let mut base = style::ticker_card(theme);
+        if focused {
             base.border = iced::Border {
-                color: iced::Color::from_rgb(0.2, 0.6, 1.0), // Blue focus color
+                color: iced::Color::from_rgb(0.2, 0.6, 1.0),
                 width: 2.0,
                 radius: base.border.radius,
             };
-            base
         }
-    } else {
-        |theme: &iced::Theme, status: iced::widget::button::Status| {
-            style::button::ticker_card(theme, status)
-        }
-    };
-
-    container(
-        button(
-            row![
-                color_column,
-                column![
-                    row![
-                        row![
-                            match exchange {
-                                Exchange::BybitInverse
-                                | Exchange::BybitLinear
-                                | Exchange::BybitSpot => icon_text(Icon::BybitLogo, 12),
-                                Exchange::BinanceInverse
-                                | Exchange::BinanceLinear
-                                | Exchange::BinanceSpot => icon_text(Icon::BinanceLogo, 12),
-                                Exchange::HyperliquidPerps => icon_text(Icon::HyperliquidLogo, 10),
-                            },
-                            text(display_data.display_ticker.clone()),
-                        ]
-                        .spacing(2)
-                        .align_y(alignment::Vertical::Center),
-                        Space::new(Length::Fill, Length::Shrink),
-                        text(display_data.price_change_display.clone()),
-                    ]
-                    .spacing(4)
-                    .align_y(alignment::Vertical::Center),
-                    row![
-                        text(display_data.mark_price_display.clone()),
-                        Space::new(Length::Fill, Length::Shrink),
-                        text(display_data.volume_display.clone()),
-                    ]
-                    .spacing(4),
-                ]
-                .padding(padding::left(8).right(8).bottom(4).top(4))
-                .spacing(4),
-            ]
-            .align_y(Alignment::Center),
-        )
-        .style(focus_style)
-        .on_press(Message::ExpandTickerCard(Some((*ticker, exchange)))),
-    )
-    .height(Length::Fixed(56.0))
+        base
+    })
+    .height(Length::Fixed(TICKER_CARD_HEIGHT))
     .into()
 }
 
@@ -1195,12 +1201,6 @@ fn create_chart_type_button(
         ChartType::TimeAndSales => "time&sales",
     };
 
-    let width = if chart_type == ChartType::TimeAndSales {
-        Length::Fixed(160.0)
-    } else {
-        Length::Fixed(180.0)
-    };
-
     // For chart type buttons, we want to keep the expanded view open
     // so users can select multiple chart types
     let button = button(text(label.to_string()).align_x(Horizontal::Center))
@@ -1209,7 +1209,8 @@ fn create_chart_type_button(
             exchange,
             chart_type_str.to_string()
         ))
-        .width(width);
+        .width(Length::Fill)
+        .height(Length::Fixed(28.0));
 
     if is_selected {
         button.style(|theme: &iced::Theme, status: iced::widget::button::Status| {
@@ -1236,78 +1237,96 @@ fn create_expanded_ticker_card(
 ) -> Element<'static, Message> {
     let (ticker_str, market) = ticker.display_symbol_and_type();
 
-    column![
-        row![
-            button(icon_text(Icon::Return, 11))
-                .on_press(Message::ExpandTickerCard(None))
-                .style(|theme, status| style::button::transparent(theme, status, false)),
-            button(if is_fav {
-                icon_text(Icon::StarFilled, 11)
-            } else {
-                icon_text(Icon::Star, 11)
-            })
+    // Dynamic color for daily change text (reuse same logic as collapsed row)
+    let change_style = move |theme: &Theme| {
+        let palette = theme.extended_palette();
+        let magnitude = display_data.card_color_alpha.abs().clamp(0.0, 1.0);
+        let strong = if display_data.card_color_alpha >= 0.0 {
+            palette.success.strong.color
+        } else {
+            palette.danger.strong.color
+        };
+        let white = iced::Color::from_rgb(1.0, 1.0, 1.0);
+        let t = {
+            let threshold = 0.2;
+            if magnitude <= threshold { 0.0 } else { ((magnitude - threshold) / (1.0 - threshold)).clamp(0.0, 1.0) }
+        };
+        let lerp = |a: iced::Color, b: iced::Color, x: f32| iced::Color {
+            r: a.r + (b.r - a.r) * x,
+            g: a.g + (b.g - a.g) * x,
+            b: a.b + (b.b - a.b) * x,
+            a: a.a + (b.a - a.a) * x,
+        };
+        let mut s = iced::widget::text::Style::default();
+        s.color = Some(lerp(white, strong, t));
+        s
+    };
+
+    // Top bar with back + fav and title line
+    let header = row![
+        button(icon_text(Icon::Return, 12))
+            .on_press(Message::ExpandTickerCard(None))
+            .style(|theme, status| style::button::transparent(theme, status, false)),
+        button(if is_fav { icon_text(Icon::StarFilled, 12) } else { icon_text(Icon::Star, 12) })
             .on_press(Message::FavoriteTicker(exchange, *ticker))
             .style(|theme, status| style::button::transparent(theme, status, false)),
-        ]
-        .spacing(2),
+        Space::new(Length::Fixed(8.0), Length::Shrink),
+        match exchange {
+            Exchange::BybitInverse | Exchange::BybitLinear | Exchange::BybitSpot => icon_text(Icon::BybitLogo, 12),
+            Exchange::BinanceInverse | Exchange::BinanceLinear | Exchange::BinanceSpot => icon_text(Icon::BinanceLogo, 12),
+            Exchange::HyperliquidPerps => icon_text(Icon::HyperliquidLogo, 10),
+        },
+        text(format!("{} {}{}", ticker_str, market.to_string(), match market { MarketKind::Spot => "", MarketKind::LinearPerps | MarketKind::InversePerps => " Perp" })).size(14),
+    ]
+    .align_y(Alignment::Center)
+    .spacing(6);
+
+    // Stats row: three columns aligned
+    let stats = column![
         row![
-            match exchange {
-                Exchange::BybitInverse | Exchange::BybitLinear | Exchange::BybitSpot =>
-                    icon_text(Icon::BybitLogo, 12),
-                Exchange::BinanceInverse | Exchange::BinanceLinear | Exchange::BinanceSpot =>
-                    icon_text(Icon::BinanceLogo, 12),
-                Exchange::HyperliquidPerps =>
-                    icon_text(Icon::HyperliquidLogo, 10),
-            },
-            text(
-                ticker_str
-                    + " "
-                    + &market.to_string()
-                    + match market {
-                        MarketKind::Spot => "",
-                        MarketKind::LinearPerps | MarketKind::InversePerps => " Perp",
-                    }
-            ),
-        ]
-        .spacing(2),
-        container(
-            column![
-                row![
-                    text("Last Updated Price: ").size(11),
-                    Space::new(Length::Fill, Length::Shrink),
-                    text(display_data.mark_price_display.clone())
-                ],
-                row![
-                    text("Daily Change: ").size(11),
-                    Space::new(Length::Fill, Length::Shrink),
-                    text(display_data.price_change_display.clone()),
-                ],
-                row![
-                    text("Daily Volume: ").size(11),
-                    Space::new(Length::Fill, Length::Shrink),
-                    text(display_data.volume_display.clone()),
-                ],
-            ]
-            .spacing(2)
-        )
-        .style(|theme: &Theme| {
+            text("Last Updated Price:").size(11),
+            Space::new(Length::Fill, Length::Shrink),
+            text(display_data.mark_price_display.clone()).size(12),
+        ],
+        row![
+            text("Daily Change:").size(11),
+            Space::new(Length::Fill, Length::Shrink),
+            text(display_data.price_change_display.clone()).style(change_style).size(12),
+        ],
+        row![
+            text("Daily Volume:").size(11),
+            Space::new(Length::Fill, Length::Shrink),
+            text(display_data.volume_display.clone()).size(12),
+        ],
+    ]
+    .spacing(4)
+    .padding(padding::left(4).right(4));
+
+    // Chart buttons stacked, full width
+    let chart_buttons = column![
+        create_chart_type_button("Heatmap Chart", ChartType::Heatmap, ticker, exchange, selected_chart_type),
+        create_chart_type_button("Footprint Chart", ChartType::Footprint, ticker, exchange, selected_chart_type),
+        create_chart_type_button("Candlestick Chart", ChartType::Candlestick, ticker, exchange, selected_chart_type),
+        create_chart_type_button("Time&Sales", ChartType::TimeAndSales, ticker, exchange, selected_chart_type),
+    ]
+    .spacing(6)
+    .width(Length::Fill);
+
+    column![
+        header,
+        Space::new(Length::Shrink, Length::Fixed(6.0)),
+        container(stats).style(|theme: &Theme| {
             let palette = theme.extended_palette();
             iced::widget::container::Style {
-                text_color: Some(palette.background.base.text.scale_alpha(0.9)),
+                text_color: Some(palette.background.base.text.scale_alpha(0.95)),
                 ..Default::default()
             }
         }),
-        column![
-            create_chart_type_button("Heatmap Chart", ChartType::Heatmap, ticker, exchange, selected_chart_type),
-            create_chart_type_button("Footprint Chart", ChartType::Footprint, ticker, exchange, selected_chart_type),
-            create_chart_type_button("Candlestick Chart", ChartType::Candlestick, ticker, exchange, selected_chart_type),
-            create_chart_type_button("Time&Sales", ChartType::TimeAndSales, ticker, exchange, selected_chart_type),
-        ]
-        .width(Length::Fill)
-        .spacing(2),
+        Space::new(Length::Shrink, Length::Fixed(6.0)),
+        chart_buttons,
     ]
-    .padding(padding::top(8).right(16).left(16).bottom(16))
-    .spacing(12)
+    .padding(padding::top(8).right(12).left(12).bottom(12))
+    .spacing(8)
     .into()
 }
 
