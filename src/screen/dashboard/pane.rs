@@ -67,9 +67,7 @@ pub enum Message {
     Restore,
     TicksizeSelected(TickMultiplier, pane_grid::Pane),
     BasisSelected(Basis, pane_grid::Pane),
-    // Open right-side panels
     OpenTickerBrowser(pane_grid::Pane),
-    OpenSettingsPanel(pane_grid::Pane),
     TickerBrowser(pane_grid::Pane, super::tickers_table::Message),
     ToggleModal(pane_grid::Pane, Modal),
     InitPaneContent(String, Option<pane_grid::Pane>, Vec<StreamKind>, TickerInfo),
@@ -480,7 +478,7 @@ impl State {
         if !matches!(&self.content, Content::Starter) {
             buttons = buttons.push(button_with_tooltip(
                 icon_text(Icon::Cog, 12),
-                Message::OpenSettingsPanel(pane),
+                Message::ToggleModal(pane, Modal::Settings),
                 None,
                 tooltip_pos,
                 modal_btn_style(Modal::Settings),
@@ -1084,44 +1082,13 @@ where
             padding::right(12).left(12),
             Alignment::End,
         ),
-        Some(Modal::Settings) => {
-            // Enriched settings: include chart-type selector & ticker quick switch inline
-            let current_kind = state.content.chart_kind();
-            let mut header_row = iced::widget::row![];
-
-            // Chart type quick toggle
-            if let Some(kind) = current_kind {
-                let to_footprint = iced::widget::button(iced::widget::text("Footprint"))
-                    .on_press(Message::InitPaneContent(
-                        "footprint".to_string(),
-                        Some(pane),
-                        state.streams.clone(),
-                        state.settings.ticker_info.unwrap(),
-                    ));
-                let to_candles = iced::widget::button(iced::widget::text("Candles"))
-                    .on_press(Message::InitPaneContent(
-                        "candlestick".to_string(),
-                        Some(pane),
-                        state.streams.clone(),
-                        state.settings.ticker_info.unwrap(),
-                    ));
-
-                header_row = match kind {
-                    data::chart::KlineChartKind::Footprint { .. } => header_row.push(to_candles),
-                    data::chart::KlineChartKind::Candles => header_row.push(to_footprint),
-                };
-            }
-
-            let content = iced::widget::column![header_row, settings_view()].spacing(8);
-
-            stack(
-                base,
-                content,
-                Message::ToggleModal(pane, Modal::Settings),
-                padding::right(12).left(12),
-                Alignment::End,
-            )
-        }
+        Some(Modal::Settings) => stack(
+            base,
+            settings_view(),
+            Message::ToggleModal(pane, Modal::Settings),
+            padding::right(12).left(12),
+            Alignment::End,
+        ),
         None => base,
     }
 }
