@@ -438,7 +438,7 @@ impl State {
             Status::Ready => {}
         }
 
-        let content = pane_grid::Content::new(self.content.view(id, self, timezone))
+        let content = pane_grid::Content::new(self.content.view(id, self, timezone, window != main_window.id))
             .style(move |theme| style::pane_background(theme, is_focused));
 
         let title_bar = pane_grid::TitleBar::new(stream_info_element)
@@ -907,6 +907,7 @@ impl Content {
         pane: pane_grid::Pane,
         state: &'a State,
         timezone: UserTimezone,
+        is_popout: bool,
     ) -> Element<'a, Message> {
         match self {
             Content::Starter => center(text("select a ticker to start").size(16)).into(),
@@ -921,7 +922,7 @@ impl Content {
                 }).into();
 
                 match state.modal {
-                    Some(Modal::TickerBrowser) => {
+                    Some(Modal::TickerBrowser) if is_popout => {
                         if let Some(table) = state.ticker_browser.as_ref() {
                             let content = container(responsive(move |size| {
                                 table.view(size).map(move |m| {
@@ -973,6 +974,7 @@ impl Content {
                     indicators,
                     settings_view,
                     stream_modifier,
+                    is_popout,
                 )
             }
             Content::Kline(chart, indicators) => {
@@ -1006,6 +1008,7 @@ impl Content {
                     indicators,
                     settings_view,
                     stream_modifier,
+                    is_popout,
                 )
             }
         }
@@ -1033,6 +1036,7 @@ fn compose_chart_view<'a, F>(
     indicators: &'a [impl Indicator],
     settings_view: F,
     stream_modifier: StreamModifier,
+    show_ticker_browser: bool,
 ) -> Element<'a, Message>
 where
     F: FnOnce() -> Element<'a, Message>,
@@ -1044,7 +1048,7 @@ where
         .into();
 
     match state.modal {
-        Some(Modal::TickerBrowser) => {
+        Some(Modal::TickerBrowser) if show_ticker_browser => {
             if let Some(table) = state.ticker_browser.as_ref() {
                 let content = container(responsive(move |size| {
                     table.view(size).map(move |m| {
@@ -1065,6 +1069,7 @@ where
                 base
             }
         }
+        Some(Modal::TickerBrowser) => base,
         Some(Modal::StreamModifier) => {
             // Only show StreamModifier by itself
             stack(

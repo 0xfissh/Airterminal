@@ -22,10 +22,11 @@ use exchange::{
 };
 
 use iced::{
-    Element, Length, Subscription, Task, Vector,
+    Alignment, Element, Length, Rectangle, Subscription, Task, Vector,
+    padding,
     task::{Straw, sipper},
     widget::{
-        PaneGrid, center, container,
+        PaneGrid, center, container, mouse_area, opaque, responsive,
         pane_grid::{self, Configuration},
     },
 };
@@ -875,7 +876,7 @@ impl Dashboard {
         main_window: &'a Window,
         timezone: UserTimezone,
     ) -> Element<'a, Message> {
-        let pane_grid: Element<_> = PaneGrid::new(&self.panes, |id, pane, maximized| {
+        let base_grid: Element<_> = PaneGrid::new(&self.panes, |id, pane, maximized| {
             let is_focused = self.focus == Some((main_window.id, id));
             pane.view(
                 id,
@@ -895,7 +896,96 @@ impl Dashboard {
         .style(style::pane_grid)
         .into();
 
-        pane_grid.map(move |message| Message::Pane(main_window.id, message))
+        // Map base to Dashboard messages
+        let mut element: Element<_> = base_grid.map(move |message| Message::Pane(main_window.id, message));
+
+        if let Some((pane_id, table)) = self
+            .panes
+            .iter()
+            .find_map(|(pid, state)| {
+                if state.modal == Some(pane::Modal::TickerBrowser) {
+                    state
+                        .ticker_browser
+                        .as_ref()
+                        .map(|t| (*pid, t))
+                } else {
+                    None
+                }
+            })
+        {
+            // Capture layout and constants for positioning below the ticker button within the pane title bar
+            let layout = self.panes.layout().clone();
+            let spacing: f32 = 6.0;
+            let min_size: f32 = 200.0;
+            let titlebar_height: f32 = 32.0;
+            let titlebar_left_inset: f32 = 8.0;
+
+            let close_msg = Message::Pane(
+                main_window.id,
+                pane::Message::ToggleModal(pane_id, pane::Modal::TickerBrowser),
+            );
+
+            element = iced::widget::stack![
+                element,
+                responsive(move |size| {
+                    let regions = layout.pane_regions(spacing, min_size, size);
+                    let rect = regions
+                        .get(&pane_id)
+                        .copied()
+                        .unwrap_or(Rectangle { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
+
+                    let is_bottom_half = rect.y + titlebar_height > (size.height * 0.5);
+                    let mut left_pad = rect.x + titlebar_left_inset;
+                    // If the ticker button area is on the right half, nudge overlay a bit to the left
+                    if left_pad > size.width * 0.5 {
+                        left_pad = (left_pad - 120.0).max(12.0);
+                    }
+                    // Clamp to keep overlay fully visible horizontally
+                    let overlay_w = 360.0_f32;
+                    let right_margin = 12.0_f32;
+                    if left_pad + overlay_w > size.width - right_margin {
+                        left_pad = (size.width - right_margin - overlay_w).max(12.0);
+                    }
+
+                    let content = container(
+                        table
+                            .view(size)
+                            .map(move |m| Message::Pane(main_window.id, pane::Message::TickerBrowser(pane_id, m))),
+                    )
+                    .width(Length::Fixed(360.0))
+                    .height(Length::Shrink);
+
+                    if is_bottom_half {
+                        // Render above the pane: bottom-align overlay so its bottom sits at rect.y
+                        let bottom_pad = size.height - rect.y;
+                        mouse_area(
+                            container(opaque(content))
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .padding(padding::left(left_pad).bottom(bottom_pad))
+                                .align_x(Alignment::Start)
+                                .align_y(Alignment::End),
+                        )
+                        .on_press(close_msg.clone())
+                        .into()
+                    } else {
+                        // Render below the title bar
+                        mouse_area(
+                            container(opaque(content))
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .padding(padding::left(left_pad).top(rect.y + titlebar_height))
+                                .align_x(Alignment::Start),
+                        )
+                        .on_press(close_msg.clone())
+                        .into()
+                    }
+                })
+            ]
+            .into();
+        }
+
+        element
     }
 
     pub fn view_window<'a>(
