@@ -1,4 +1,3 @@
-use super::tickers_table::{self, TickersTable};
 use crate::{
     TooltipPosition,
     layout::SavedState,
@@ -9,7 +8,6 @@ use data::sidebar;
 
 use iced::{
     Alignment, Element, Length, Subscription, Task,
-    widget::{text_input},
     widget::{Space, column, row},
 };
 
@@ -17,33 +15,24 @@ use iced::{
 pub enum Message {
     ToggleSidebarMenu(Option<sidebar::Menu>),
     SetSidebarPosition(sidebar::Position),
-    TickersTable(super::tickers_table::Message),
 }
 
 pub struct Sidebar {
     pub state: data::Sidebar,
-    tickers_table: TickersTable,
 }
 
-pub enum Action {
-    TickerSelected(exchange::TickerInfo, exchange::adapter::Exchange, String),
-    ErrorOccurred(data::InternalError),
-}
 
 impl Sidebar {
     pub fn new(state: &SavedState) -> (Self, Task<Message>) {
-        let (tickers_table, initial_fetch) = TickersTable::new(state.favorited_tickers.clone());
-
         (
             Self {
                 state: state.sidebar,
-                tickers_table,
             },
-            initial_fetch.map(Message::TickersTable),
+            Task::none(),
         )
     }
 
-    pub fn update(&mut self, message: Message) -> (Task<Message>, Option<Action>) {
+    pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::ToggleSidebarMenu(menu) => {
                 self.set_menu(menu.filter(|&m| !self.is_menu_active(m)));
@@ -51,40 +40,9 @@ impl Sidebar {
             Message::SetSidebarPosition(position) => {
                 self.state.position = position;
             }
-            Message::TickersTable(msg) => {
-                // Check if this is a toggle table message before processing
-                let is_toggle_table = matches!(msg, super::tickers_table::Message::ToggleTable);
-
-                let action = self.tickers_table.update(msg);
-
-                match action {
-                    Some(tickers_table::Action::TickerSelected(ticker_info, exchange, content)) => {
-                        return (
-                            Task::none(),
-                            Some(Action::TickerSelected(ticker_info, exchange, content)),
-                        );
-                    }
-                    Some(tickers_table::Action::Fetch(task)) => {
-                        return (task.map(Message::TickersTable), None);
-                    }
-                    Some(tickers_table::Action::ErrorOccurred(error)) => {
-                        return (Task::none(), Some(Action::ErrorOccurred(error)));
-                    }
-                    None => {}
-                }
-
-                // Handle focus command when ticker table is toggled
-                if is_toggle_table && self.tickers_table.is_open() {
-                    // Focus the search input when table opens
-                    return (
-                        text_input::focus("ticker_search").map(Message::TickersTable),
-                        None,
-                    );
-                }
-            }
         }
 
-        (Task::none(), None)
+        Task::none()
     }
 
     pub fn view(&self, audio_volume: Option<f32>) -> Element<'_, Message> {
@@ -104,7 +62,7 @@ impl Sidebar {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        self.tickers_table.subscription().map(Message::TickersTable)
+        Subscription::none()
     }
 
     fn nav_buttons(
@@ -200,7 +158,4 @@ impl Sidebar {
         self.state.active_menu = menu;
     }
 
-    pub fn favorited_tickers(&self) -> Vec<(exchange::adapter::Exchange, exchange::Ticker)> {
-        self.tickers_table.favorited_tickers()
-    }
 }

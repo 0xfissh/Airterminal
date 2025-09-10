@@ -42,6 +42,8 @@ pub enum Message {
     Notification(Toast),
     LayoutFetchAll,
     RefreshStreams,
+    // Global keyboard events handled at dashboard level (e.g., "/" to open ticker browser)
+    KeyPressed(iced::keyboard::Key, iced::keyboard::Modifiers),
     ChartRequestedFetch {
         window: window::Id,
         pane: pane_grid::Pane,
@@ -61,6 +63,7 @@ pub struct Dashboard {
     pub focus: Option<(window::Id, pane_grid::Pane)>,
     pub popout: HashMap<window::Id, (pane_grid::State<pane::State>, WindowSpec)>,
     pub streams: UniqueStreams,
+    favorites: Vec<(Exchange, Ticker)>,
 }
 
 impl Default for Dashboard {
@@ -70,6 +73,7 @@ impl Default for Dashboard {
             focus: None,
             streams: UniqueStreams::default(),
             popout: HashMap::new(),
+            favorites: Vec::new(),
         }
     }
 }
@@ -114,6 +118,7 @@ impl Dashboard {
     pub fn from_config(
         panes: Configuration<pane::State>,
         popout_windows: Vec<(Configuration<pane::State>, WindowSpec)>,
+        favorites: Vec<(Exchange, Ticker)>,
     ) -> Self {
         let panes = pane_grid::State::with_configuration(panes);
 
@@ -131,6 +136,7 @@ impl Dashboard {
             focus: None,
             streams: UniqueStreams::default(),
             popout,
+            favorites,
         }
     }
 
@@ -170,6 +176,84 @@ impl Dashboard {
         ]))
     }
 
+    pub fn keyboard_subscription() -> Subscription<Message> {
+        // Only emit messages we care about (e.g., "/"); other keys are handled by components
+        iced::event::listen_with(|event, _status, _window| match event {
+            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                let is_toggle = matches!(&key,
+                    iced::keyboard::Key::Character(c)
+                        if c.as_str() == "/"
+                            && !modifiers.command()
+                            && !modifiers.shift()
+                            && !modifiers.alt()
+                            && !modifiers.control()
+                );
+
+                let is_nav = matches!(
+                    key,
+                    iced::keyboard::Key::Named(
+                        iced::keyboard::key::Named::ArrowUp
+                            | iced::keyboard::key::Named::ArrowDown
+                            | iced::keyboard::key::Named::Enter
+                            | iced::keyboard::key::Named::Backspace
+                            | iced::keyboard::key::Named::Escape
+                    )
+                );
+
+                if is_toggle || is_nav {
+                    Some(Message::KeyPressed(key.clone(), modifiers))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+    }
+
+    pub fn tables_subscription(&self, main_window: window::Id) -> Subscription<Message> {
+        // Wire subscriptions for all open ticker browsers so their keyboard/timer work
+        let mut subs: Vec<Subscription<Message>> = vec![];
+
+        // Main window panes
+        for (pane_id, state) in self.panes.iter() {
+            if state.ticker_browser.is_some() {
+                let p = *pane_id;
+                subs.push(
+                    tickers_table::TickersTable::open_subscription()
+                        .map(move |m| Message::Pane(main_window, pane::Message::TickerBrowser(p, m))),
+                );
+            }
+        }
+
+        // Popout panes
+        for (window_id, (panes, _spec)) in &self.popout {
+            for (pane_id, state) in panes.iter() {
+                if state.ticker_browser.is_some() {
+                    let w = *window_id;
+                    let p = *pane_id;
+                    subs.push(
+                        tickers_table::TickersTable::open_subscription()
+                            .map(move |m| Message::Pane(w, pane::Message::TickerBrowser(p, m))),
+                    );
+                }
+            }
+        }
+
+        if subs.is_empty() {
+            Subscription::none()
+        } else {
+            Subscription::batch(subs)
+        }
+    }
+
+    pub fn set_favorites(&mut self, favs: Vec<(Exchange, Ticker)>) {
+        self.favorites = favs;
+    }
+
+    pub fn favorited_tickers(&self) -> Vec<(Exchange, Ticker)> {
+        self.favorites.clone()
+    }
+
     pub fn update(
         &mut self,
         message: Message,
@@ -177,6 +261,84 @@ impl Dashboard {
         layout_id: &uuid::Uuid,
     ) -> (Task<Message>, Option<Event>) {
         match message {
+            Message::KeyPressed(key, modifiers) => {
+                // Currently only handling "/" (without modifiers) to toggle the ticker browser on focused pane
+                if let iced::keyboard::Key::Character(c) = &key {
+                    if c.as_str() == "/"
+                        && !modifiers.command()
+                        && !modifiers.shift()
+                        && !modifiers.alt()
+                        && !modifiers.control()
+                    {
+                        if let Some((window, pane)) = self.focus {
+                            let should_close = self
+                                .get_pane(main_window.id, window, pane)
+                                .map(|ps| ps.modal == Some(pane::Modal::TickerBrowser))
+                                .unwrap_or(false);
+
+                            let msg = if should_close {
+                                pane::Message::ToggleModal(pane, pane::Modal::TickerBrowser)
+                            } else {
+                                pane::Message::OpenTickerBrowser(pane)
+                            };
+
+                            // Focus search when opening
+                            if !should_close {
+                                let focus_task = iced::widget::text_input::focus("ticker_search")
+                                    .map(|_m: tickers_table::Message| Message::RefreshStreams);
+                                return (
+                                    Task::done(Message::Pane(window, msg)).chain(focus_task),
+                                    None,
+                                );
+                            }
+
+                            return (Task::done(Message::Pane(window, msg)), None);
+                        }
+                    }
+                }
+
+                // Forward navigation keys to the open ticker browser in the focused pane
+                let is_nav_key = matches!(
+                    key,
+                    iced::keyboard::Key::Named(
+                        iced::keyboard::key::Named::ArrowUp
+                            | iced::keyboard::key::Named::ArrowDown
+                            | iced::keyboard::key::Named::Enter
+                            | iced::keyboard::key::Named::Backspace
+                            | iced::keyboard::key::Named::Escape
+                    )
+                );
+
+                if is_nav_key {
+                    if let Some((window, pane)) = self.focus {
+                        if let Some(pane_state) = self.get_mut_pane(main_window.id, window, pane) {
+                            if let Some(table) = pane_state.ticker_browser.as_mut() {
+                                match table.update(tickers_table::Message::KeyboardNavigate(key, modifiers)) {
+                                    Some(tickers_table::Action::TickerSelected(ti, ex, content)) => {
+                                        // Close browser and init pane with the selected chart
+                                        pane_state.ticker_browser = None;
+                                        pane_state.modal = None;
+                                        let task = self.init_pane_task(main_window.id, ti, ex, &content);
+                                        return (task, None);
+                                    }
+                                    Some(tickers_table::Action::Fetch(task)) => {
+                                        let target_window = window;
+                                        let target_pane = pane;
+                                        return (
+                                            task.map(move |m| Message::Pane(target_window, pane::Message::TickerBrowser(target_pane, m))),
+                                            None,
+                                        );
+                                    }
+                                    Some(tickers_table::Action::ErrorOccurred(err)) => {
+                                        return (Task::done(Message::Notification(Toast::error(err.to_string()))), None);
+                                    }
+                                    None => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             Message::SavePopoutSpecs(specs) => {
                 for (window_id, new_spec) in specs {
                     if let Some((_, spec)) = self.popout.get_mut(&window_id) {
@@ -221,6 +383,32 @@ impl Dashboard {
                                         return (Task::done(Message::Notification(Toast::error(err.to_string()))), None);
                                     }
                                     None => {}
+                                }
+                                // Sync shared favorites from this table and broadcast to other open tables
+                                let new_favs = table.favorited_tickers();
+                                if new_favs != self.favorites {
+                                    self.favorites = new_favs.clone();
+
+                                    // Update any other open ticker browsers to reflect latest favorites
+                                    // Main window panes
+                                    for (p_id, p_state) in self.panes.iter_mut() {
+                                        if *p_id != pane {
+                                            if let Some(other_table) = p_state.ticker_browser.as_mut() {
+                                                other_table.set_favorites(&new_favs);
+                                            }
+                                        }
+                                    }
+
+                                    // Popout panes
+                                    for (_w_id, (panes, _)) in self.popout.iter_mut() {
+                                        for (p_id, p_state) in panes.iter_mut() {
+                                            if *p_id != pane {
+                                                if let Some(other_table) = p_state.ticker_browser.as_mut() {
+                                                    other_table.set_favorites(&new_favs);
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -282,22 +470,29 @@ impl Dashboard {
                         return (Task::done(Message::RefreshStreams), None);
                     }
                     pane::Message::OpenTickerBrowser(pane) => {
+                        let favs = self.favorites.clone();
                         if let Some(state) = self.get_mut_pane(main_window.id, window, pane) {
                             if state.ticker_browser.is_none() {
-                                let (table, task) = tickers_table::TickersTable::new(vec![]);
+                                let (table, task) = tickers_table::TickersTable::new(favs);
                                 state.ticker_browser = Some(table);
                                 let target_pane = pane;
                                 if let Some(ps) = self.get_mut_pane(main_window.id, window, pane) {
                                     ps.modal = Some(pane::Modal::TickerBrowser);
                                 }
+                                let focus_task = iced::widget::text_input::focus("ticker_search")
+                                    .map(|_m: tickers_table::Message| Message::RefreshStreams);
                                 return (
-                                    task.map(move |m| Message::Pane(window, pane::Message::TickerBrowser(target_pane, m))),
+                                    task.map(move |m| Message::Pane(window, pane::Message::TickerBrowser(target_pane, m)))
+                                        .chain(focus_task),
                                     None,
                                 );
                             } else {
                                 if let Some(ps) = self.get_mut_pane(main_window.id, window, pane) {
                                     ps.modal = Some(pane::Modal::TickerBrowser);
                                 }
+                                let focus_task = iced::widget::text_input::focus("ticker_search")
+                                    .map(|_m: tickers_table::Message| Message::RefreshStreams);
+                                return (focus_task, None);
                             }
                         }
                     }

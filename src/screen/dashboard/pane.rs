@@ -328,7 +328,8 @@ impl State {
             .spacing(8)
             .height(Length::Fixed(32.0));
 
-        if let Some((exchange, ticker)) = self.stream_pair() {
+        // Always show ticker button, even on new/reset panes
+        let ticker_button = if let Some((exchange, ticker)) = self.stream_pair() {
             let exchange_info = match exchange {
                 Exchange::BinanceSpot | Exchange::BinanceLinear | Exchange::BinanceInverse => {
                     icon_text(Icon::BinanceLogo, 14)
@@ -350,7 +351,7 @@ impl State {
             };
 
             // Make the entire ticker pill (icon + text) a rounded button to open browser
-            let ticker_button = button(
+            button(
                 row![exchange_info, text(ticker_str).size(14)]
                     .align_y(Vertical::Center)
                     .spacing(6),
@@ -362,10 +363,15 @@ impl State {
                 } else {
                     Message::OpenTickerBrowser(id)
                 }
-            );
+            )
+        } else {
+            // Show search icon button for new/reset panes
+            button(icon_text(Icon::Search, 14))
+                .style(|theme, status| style::button::modifier(theme, status, false))
+                .on_press(Message::OpenTickerBrowser(id))
+        };
 
-            stream_info_element = stream_info_element.push(ticker_button);
-        }
+        stream_info_element = stream_info_element.push(ticker_button);
 
         let is_stream_modifier = self
             .modal

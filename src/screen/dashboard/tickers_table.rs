@@ -152,11 +152,17 @@ pub struct TickersTable {
     // Keyboard navigation
     focused_index: Option<usize>,
     selected_chart_type: Option<ChartType>,
+    // Shared favorites provided by dashboard; kept in a fast lookup map
+    favorites_map: HashMap<Exchange, std::collections::HashSet<Ticker>>,
 }
 
 impl TickersTable {
-    pub fn new(_favorited_tickers: Vec<(Exchange, Ticker)>) -> (Self, Task<Message>) {
-        // Note: favorited_tickers will be handled during data updates
+    pub fn new(favorited_tickers: Vec<(Exchange, Ticker)>) -> (Self, Task<Message>) {
+        // Build favorites map from provided list
+        let mut favorites_map: HashMap<Exchange, std::collections::HashSet<Ticker>> = HashMap::new();
+        for (ex, tk) in favorited_tickers {
+            favorites_map.entry(ex).or_default().insert(tk);
+        }
 
         (
             Self {
@@ -180,9 +186,37 @@ impl TickersTable {
                 pending_requests: std::collections::HashSet::new(),
                 focused_index: None,
                 selected_chart_type: Some(ChartType::Candlestick), // Default to candlestick
+                favorites_map,
             },
             fetch_tickers_info(),
         )
+    }
+
+    pub fn set_favorites(&mut self, favorited_tickers: &[(Exchange, Ticker)]) {
+        // Rebuild shared favorites map
+        let mut new_map: HashMap<Exchange, std::collections::HashSet<Ticker>> = HashMap::new();
+        for (ex, tk) in favorited_tickers {
+            new_map.entry(*ex).or_default().insert(*tk);
+        }
+        self.favorites_map = new_map;
+
+        // Reflect into current entries so Favorites tab and icons update immediately
+        for (exchange, entries) in self.ticker_data.iter_mut() {
+            let set = self
+                .favorites_map
+                .get(exchange)
+                .cloned()
+                .unwrap_or_default();
+            for entry in entries.iter_mut() {
+                entry.is_favorite = set.contains(&entry.ticker);
+                entry.display_data = None; // invalidate display cache
+            }
+        }
+
+        // Invalidate caches since filtering may have changed
+        self.cached_sort_option = None;
+        self.cached_sorted_indices.clear();
+        self.needs_filter_update = true;
     }
 
     pub fn update_table(&mut self, exchange: Exchange, ticker_stats: HashMap<Ticker, TickerStats>) {
@@ -198,15 +232,20 @@ impl TickersTable {
             }
         }
 
-        // Create new entries with preserved favorites
+        // Create new entries with preserved favorites and apply shared favorites
         let entries: Vec<TickerEntry> = ticker_stats
             .into_iter()
             .map(|(ticker, stats)| {
                 let (symbol, _) = ticker.to_full_symbol_and_type();
+                let shared_fav = self
+                    .favorites_map
+                    .get(&exchange)
+                    .map(|set| set.contains(&ticker))
+                    .unwrap_or(false);
                 TickerEntry {
                     ticker,
                     stats,
-                    is_favorite: *favorites_map.get(&ticker).unwrap_or(&false),
+                    is_favorite: *favorites_map.get(&ticker).unwrap_or(&false) || shared_fav,
                     display_data: None, // Lazy compute
                     search_string: symbol, // Pre-compute for fast searching
                 }
@@ -458,6 +497,13 @@ impl TickersTable {
                 }
             }
         }
+        // Update shared favorites map
+        let set = self.favorites_map.entry(exchange).or_default();
+        if set.contains(&ticker) {
+            set.remove(&ticker);
+        } else {
+            set.insert(ticker);
+        }
         // Invalidate caches since filtering may have changed
         self.cached_sort_option = None;
         self.cached_sorted_indices.clear();
@@ -465,15 +511,14 @@ impl TickersTable {
     }
 
     pub fn favorited_tickers(&self) -> Vec<(Exchange, Ticker)> {
-        let mut favorites = Vec::new();
-        for (exchange, entries) in &self.ticker_data {
-            for entry in entries {
-                if entry.is_favorite {
-                    favorites.push((*exchange, entry.ticker));
-                }
+        // Prefer the shared favorites map as the source of truth
+        let mut out: Vec<(Exchange, Ticker)> = Vec::new();
+        for (ex, set) in &self.favorites_map {
+            for tk in set {
+                out.push((*ex, *tk));
             }
         }
-        favorites
+        out
     }
 
     fn compute_display_data(ticker: &Ticker, stats: &TickerStats) -> TickerDisplayData {
@@ -1093,11 +1138,15 @@ impl TickersTable {
         }))
         .map(|_| Message::FetchForTickerStats(None));
 
-        let keyboard = iced::keyboard::on_key_press(|key, modifiers| {
-            Some(Message::KeyboardNavigate(key, modifiers))
-        });
+        timer
+    }
 
-        Subscription::batch(vec![timer, keyboard])
+    // A 'static subscription usable when a table is known to be open; avoids borrowing self
+    pub fn open_subscription() -> Subscription<Message> {
+        let timer = iced::time::every(std::time::Duration::from_secs(ACTIVE_UPDATE_INTERVAL))
+            .map(|_| Message::FetchForTickerStats(None));
+
+        timer
     }
 }
 
