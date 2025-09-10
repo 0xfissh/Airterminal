@@ -444,7 +444,9 @@ impl State {
             Status::Ready => {}
         }
 
-        let content = pane_grid::Content::new(self.content.view(id, self, timezone, window != main_window.id))
+        let show_overlay_in_pane = (window != main_window.id) || maximized;
+
+        let content = pane_grid::Content::new(self.content.view(id, self, timezone, show_overlay_in_pane))
             .style(move |theme| style::pane_background(theme, is_focused));
 
         let title_bar = pane_grid::TitleBar::new(stream_info_element)
@@ -913,10 +915,37 @@ impl Content {
         pane: pane_grid::Pane,
         state: &'a State,
         timezone: UserTimezone,
-        is_popout: bool,
+        show_overlay_in_pane: bool,
     ) -> Element<'a, Message> {
         match self {
-            Content::Starter => center(text("select a ticker to start").size(16)).into(),
+            Content::Starter => {
+                let base: Element<_> = center(text("select a ticker to start").size(16)).into();
+
+                match state.modal {
+                    Some(Modal::TickerBrowser) if show_overlay_in_pane => {
+                        if let Some(table) = state.ticker_browser.as_ref() {
+                            let content = container(responsive(move |size| {
+                                table.view(size).map(move |m| {
+                                    Message::TickerBrowser(pane, m)
+                                })
+                            }))
+                            .width(Length::Fixed(360.0))
+                            .height(Length::Fill);
+
+                            stack(
+                                base,
+                                content,
+                                Message::ToggleModal(pane, Modal::TickerBrowser),
+                                padding::left(36),
+                                Alignment::Start,
+                            )
+                        } else {
+                            base
+                        }
+                    }
+                    _ => base,
+                }
+            }
             Content::TimeAndSales(panel) => {
                 let base = super::panel::view(panel, timezone)
                     .map(move |message| Message::PanelInteraction(pane, message));
@@ -928,7 +957,7 @@ impl Content {
                 }).into();
 
                 match state.modal {
-                    Some(Modal::TickerBrowser) if is_popout => {
+                    Some(Modal::TickerBrowser) if show_overlay_in_pane => {
                         if let Some(table) = state.ticker_browser.as_ref() {
                             let content = container(responsive(move |size| {
                                 table.view(size).map(move |m| {
@@ -980,7 +1009,7 @@ impl Content {
                     indicators,
                     settings_view,
                     stream_modifier,
-                    is_popout,
+                    show_overlay_in_pane,
                 )
             }
             Content::Kline(chart, indicators) => {
@@ -1014,7 +1043,7 @@ impl Content {
                     indicators,
                     settings_view,
                     stream_modifier,
-                    is_popout,
+                    show_overlay_in_pane,
                 )
             }
         }

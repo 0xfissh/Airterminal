@@ -1094,19 +1094,37 @@ impl Dashboard {
         // Map base to Dashboard messages
         let mut element: Element<_> = base_grid.map(move |message| Message::Pane(main_window.id, message));
 
-        if let Some((pane_id, table)) = self
-            .panes
-            .iter()
-            .find_map(|(pid, state)| {
-                if state.modal == Some(pane::Modal::TickerBrowser) {
-                    state
-                        .ticker_browser
-                        .as_ref()
-                        .map(|t| (*pid, t))
-                } else {
-                    None
-                }
-            })
+        // Prefer the focused pane (on the main window) if it has the TickerBrowser open;
+        // fallback to the first pane that has it.
+        let focused_candidate = if let Some((w, pid)) = self.focus {
+            if w == main_window.id {
+                self.panes.get(pid).and_then(|state| {
+                    (state.modal == Some(pane::Modal::TickerBrowser))
+                        .then(|| state.ticker_browser.as_ref().map(|t| (pid, t)))
+                        .flatten()
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // If any pane is maximized, let the pane-level overlay handle TickerBrowser; skip dashboard overlay
+        let any_maximized = self.panes.maximized().is_some();
+
+        if !any_maximized && let Some((pane_id, table)) = focused_candidate.or_else(|| {
+            self
+                .panes
+                .iter()
+                .find_map(|(pid, state)| {
+                    if state.modal == Some(pane::Modal::TickerBrowser) {
+                        state.ticker_browser.as_ref().map(|t| (*pid, t))
+                    } else {
+                        None
+                    }
+                })
+        })
         {
             // Capture layout and constants for positioning below the ticker button within the pane title bar
             let layout = self.panes.layout().clone();
