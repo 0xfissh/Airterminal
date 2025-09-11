@@ -10,6 +10,7 @@ use crate::{
     widget::{self, button_with_tooltip, column_drag, toast::Toast},
     window::{self, Window},
 };
+use super::tickers_table;
 use data::{
     UserTimezone,
     chart::{
@@ -26,7 +27,7 @@ use iced::{
     Alignment, Element, Length, Renderer, Task, Theme,
     alignment::Vertical,
     padding,
-    widget::{button, center, pane_grid, row, text, tooltip},
+    widget::{button, center, pane_grid, row, text, tooltip, container, responsive},
 };
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -51,6 +52,7 @@ pub enum Modal {
     StreamModifier,
     Settings,
     Indicators,
+    TickerBrowser,
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +67,8 @@ pub enum Message {
     Restore,
     TicksizeSelected(TickMultiplier, pane_grid::Pane),
     BasisSelected(Basis, pane_grid::Pane),
+    OpenTickerBrowser(pane_grid::Pane),
+    TickerBrowser(pane_grid::Pane, super::tickers_table::Message),
     ToggleModal(pane_grid::Pane, Modal),
     InitPaneContent(String, Option<pane_grid::Pane>, Vec<StreamKind>, TickerInfo),
     ReplacePane(pane_grid::Pane),
@@ -91,6 +95,7 @@ pub struct State {
     pub notifications: Vec<Toast>,
     pub streams: Vec<StreamKind>,
     pub status: Status,
+    pub ticker_browser: Option<tickers_table::TickersTable>,
 }
 
 impl State {
@@ -323,7 +328,8 @@ impl State {
             .spacing(8)
             .height(Length::Fixed(32.0));
 
-        if let Some((exchange, ticker)) = self.stream_pair() {
+        // Always show ticker button, even on new/reset panes
+        let ticker_button = if let Some((exchange, ticker)) = self.stream_pair() {
             let exchange_info = match exchange {
                 Exchange::BinanceSpot | Exchange::BinanceLinear | Exchange::BinanceInverse => {
                     icon_text(Icon::BinanceLogo, 14)
@@ -344,12 +350,28 @@ impl State {
                 }
             };
 
-            stream_info_element = stream_info_element.push(
-                row![exchange_info, text(ticker_str).size(14),]
+            // Make the entire ticker pill (icon + text) a rounded button to open browser
+            button(
+                row![exchange_info, text(ticker_str).size(14)]
                     .align_y(Vertical::Center)
-                    .spacing(4),
-            );
-        }
+                    .spacing(6),
+            )
+            .style(|theme, status| style::button::modifier(theme, status, true))
+            .on_press(
+                if self.modal == Some(Modal::TickerBrowser) {
+                    Message::ToggleModal(id, Modal::TickerBrowser)
+                } else {
+                    Message::OpenTickerBrowser(id)
+                }
+            )
+        } else {
+            // Show search icon button for new/reset panes
+            button(icon_text(Icon::Search, 14))
+                .style(|theme, status| style::button::modifier(theme, status, false))
+                .on_press(Message::OpenTickerBrowser(id))
+        };
+
+        stream_info_element = stream_info_element.push(ticker_button);
 
         let is_stream_modifier = self
             .modal
@@ -422,7 +444,9 @@ impl State {
             Status::Ready => {}
         }
 
-        let content = pane_grid::Content::new(self.content.view(id, self, timezone))
+        let show_overlay_in_pane = (window != main_window.id) || maximized;
+
+        let content = pane_grid::Content::new(self.content.view(id, self, timezone, show_overlay_in_pane))
             .style(move |theme| style::pane_background(theme, is_focused));
 
         let title_bar = pane_grid::TitleBar::new(stream_info_element)
@@ -468,6 +492,8 @@ impl State {
                 modal_btn_style(Modal::Settings),
             ));
         }
+
+        // Search moved to the title (ticker area); remove old control button
 
         if matches!(&self.content, Content::Heatmap(_, _) | Content::Kline(_, _)) {
             buttons = buttons.push(button_with_tooltip(
@@ -636,6 +662,7 @@ impl Default for State {
             streams: vec![],
             notifications: vec![],
             status: Status::Ready,
+            ticker_browser: None,
         }
     }
 }
@@ -888,26 +915,77 @@ impl Content {
         pane: pane_grid::Pane,
         state: &'a State,
         timezone: UserTimezone,
+        show_overlay_in_pane: bool,
     ) -> Element<'a, Message> {
         match self {
-            Content::Starter => center(text("select a ticker to start").size(16)).into(),
+            Content::Starter => {
+                let base: Element<_> = center(text("select a ticker to start").size(16)).into();
+
+                match state.modal {
+                    Some(Modal::TickerBrowser) if show_overlay_in_pane => {
+                        if let Some(table) = state.ticker_browser.as_ref() {
+                            let content = container(responsive(move |size| {
+                                table.view(size).map(move |m| {
+                                    Message::TickerBrowser(pane, m)
+                                })
+                            }))
+                            .width(Length::Fixed(360.0))
+                            .height(Length::Fill);
+
+                            stack(
+                                base,
+                                content,
+                                Message::ToggleModal(pane, Modal::TickerBrowser),
+                                padding::left(36),
+                                Alignment::Start,
+                            )
+                        } else {
+                            base
+                        }
+                    }
+                    _ => base,
+                }
+            }
             Content::TimeAndSales(panel) => {
                 let base = super::panel::view(panel, timezone)
                     .map(move |message| Message::PanelInteraction(pane, message));
 
                 let settings_view = || timesales_cfg_view(panel.config, pane);
 
+                let base_with_toasts = widget::toast::Manager::new(base, &state.notifications, Alignment::End, move |idx| {
+                    Message::DeleteNotification(pane, idx)
+                }).into();
+
                 match state.modal {
+                    Some(Modal::TickerBrowser) if show_overlay_in_pane => {
+                        if let Some(table) = state.ticker_browser.as_ref() {
+                            let content = container(responsive(move |size| {
+                                table.view(size).map(move |m| {
+                                    Message::TickerBrowser(pane, m)
+                                })
+                            }))
+                            .width(Length::Fixed(360.0))
+                            .height(Length::Fill);
+
+                            stack(
+                                base_with_toasts,
+                                content,
+                                Message::ToggleModal(pane, Modal::TickerBrowser),
+                                padding::left(36),
+                                Alignment::Start,
+                            )
+                        } else {
+                            base_with_toasts
+                        }
+                    }
                     Some(Modal::Settings) => stack(
-                        base,
+                        base_with_toasts,
                         settings_view(),
                         Message::ToggleModal(pane, Modal::Settings),
                         padding::right(12).left(12),
                         Alignment::End,
                     ),
-                    _ => widget::toast::Manager::new(base, &state.notifications, Alignment::End, move |idx| {
-                        Message::DeleteNotification(pane, idx)
-                    }).into(),
+                    _ => base_with_toasts,
                 }
             }
             Content::Heatmap(chart, indicators) => {
@@ -931,6 +1009,7 @@ impl Content {
                     indicators,
                     settings_view,
                     stream_modifier,
+                    show_overlay_in_pane,
                 )
             }
             Content::Kline(chart, indicators) => {
@@ -964,6 +1043,7 @@ impl Content {
                     indicators,
                     settings_view,
                     stream_modifier,
+                    show_overlay_in_pane,
                 )
             }
         }
@@ -991,6 +1071,7 @@ fn compose_chart_view<'a, F>(
     indicators: &'a [impl Indicator],
     settings_view: F,
     stream_modifier: StreamModifier,
+    show_ticker_browser: bool,
 ) -> Element<'a, Message>
 where
     F: FnOnce() -> Element<'a, Message>,
@@ -1002,13 +1083,38 @@ where
         .into();
 
     match state.modal {
-        Some(Modal::StreamModifier) => stack(
-            base,
-            modal::stream::view(pane, stream_modifier, state.stream_pair()),
-            Message::ToggleModal(pane, Modal::StreamModifier),
-            padding::left(36),
-            Alignment::Start,
-        ),
+        Some(Modal::TickerBrowser) if show_ticker_browser => {
+            if let Some(table) = state.ticker_browser.as_ref() {
+                let content = container(responsive(move |size| {
+                    table.view(size).map(move |m| {
+                        Message::TickerBrowser(pane, m)
+                    })
+                }))
+                .width(Length::Fixed(360.0))
+                .height(Length::Fill);
+
+                stack(
+                    base,
+                    content,
+                    Message::ToggleModal(pane, Modal::TickerBrowser),
+                    padding::left(36),
+                    Alignment::Start,
+                )
+            } else {
+                base
+            }
+        }
+        Some(Modal::TickerBrowser) => base,
+        Some(Modal::StreamModifier) => {
+            // Only show StreamModifier by itself
+            stack(
+                base,
+                modal::stream::view(pane, stream_modifier, state.stream_pair()),
+                Message::ToggleModal(pane, Modal::StreamModifier),
+                padding::left(36),
+                Alignment::Start,
+            )
+        }
         Some(Modal::Indicators) => stack(
             base,
             modal::indicators::view(pane, state, indicators),

@@ -410,7 +410,7 @@ impl Airterminal {
                     layouts,
                     self.theme.clone(),
                     self.theme_editor.custom_theme.clone().map(data::Theme),
-                    self.sidebar.favorited_tickers(),
+                    self.active_dashboard().favorited_tickers(),
                     main_window,
                     self.timezone,
                     self.sidebar.state,
@@ -587,7 +587,7 @@ impl Airterminal {
                 }
             }
             Message::Sidebar(message) => {
-                let (task, action) = self.sidebar.update(message);
+                let task = self.sidebar.update(message);
 
                 // Check if the account menu was just activated and we need to fetch user profile
                 let fetch_profile_task = if let Some(menu) = self.sidebar.active_menu() {
@@ -602,52 +602,6 @@ impl Airterminal {
                     None
                 };
 
-                match action {
-                    Some(dashboard::sidebar::Action::TickerSelected(
-                        ticker_info,
-                        exchange,
-                        content,
-                    )) => {
-                        let main_window_id = self.main_window.id;
-
-                        let task = self.active_dashboard_mut().init_pane_task(
-                            main_window_id,
-                            ticker_info,
-                            exchange,
-                            &content,
-                        );
-
-                        return task.map(move |msg| Message::Dashboard(None, msg));
-                    }
-                    Some(dashboard::sidebar::Action::ErrorOccurred(err)) => {
-                        // Check if this error might be due to geoblocking
-                        let error_message = err.to_string().to_lowercase();
-                        let is_potential_geoblock = error_message.contains("rate limit") ||
-                            error_message.contains("429") ||
-                            error_message.contains("418") ||
-                            error_message.contains("403") ||
-                            error_message.contains("forbidden") ||
-                            error_message.contains("blocked") ||
-                            error_message.contains("invalid request") ||
-                            error_message.contains("fetch error");
-                        
-                        if is_potential_geoblock {
-                            self.geoblock_error_count += 1;
-                            
-                            // Show warning after 3 consecutive potential geoblock errors
-                            if self.geoblock_error_count >= 3 && !self.show_geoblock_warning {
-                                self.show_geoblock_warning = true;
-                                log::warn!("Potential geoblocking detected after {} errors", self.geoblock_error_count);
-                            }
-                        } else {
-                            // Reset counter if we get non-geoblock errors
-                            self.geoblock_error_count = 0;
-                        }
-                        
-                        self.notifications.push(Toast::error(err.to_string()));
-                    }
-                    None => {}
-                }
 
                 let sidebar_task = task.map(Message::Sidebar);
                 
@@ -1186,7 +1140,7 @@ impl Airterminal {
                     layouts,
                     self.theme.clone(),
                     self.theme_editor.custom_theme.clone().map(data::Theme),
-                    self.sidebar.favorited_tickers(),
+                    self.active_dashboard().favorited_tickers(),
                     main_window,
                     self.timezone,
                     self.sidebar.state,
@@ -1579,47 +1533,21 @@ impl Airterminal {
 
         let tick = iced::time::every(Duration::from_millis(100)).map(Message::Tick);
 
-        // Global keyboard handler for "/" key and Backspace key
-        let global_keyboard = iced::event::listen_with(|event, _status, _window| {
-            match event {
-                iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) => {
-                    match &key {
-                        iced::keyboard::Key::Character(c) => {
-                            if c.as_str() == "/" && !modifiers.command() && !modifiers.shift() && !modifiers.alt() && !modifiers.control() {
-                                // Always handle "/" key regardless of which widget has focus
-                                return Some(Message::Sidebar(
-                                    dashboard::sidebar::Message::TickersTable(
-                                        dashboard::tickers_table::Message::ToggleTable
-                                    )
-                                ));
-                            }
-                        }
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::Backspace) => {
-                            // Handle Backspace key globally for tickers table
-                            return Some(Message::Sidebar(
-                                dashboard::sidebar::Message::TickersTable(
-                                    dashboard::tickers_table::Message::KeyboardNavigate(key, modifiers)
-                                )
-                            ));
-                        }
-                        iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) => {
-                            // Handle Escape key globally for tickers table
-                            return Some(Message::Sidebar(
-                                dashboard::sidebar::Message::TickersTable(
-                                    dashboard::tickers_table::Message::KeyboardNavigate(key, modifiers)
-                                )
-                            ));
-                        }
-                        _ => {}
-                    }
-                    None
-                }
-                _ => None,
-            }
-        });
+        // Dashboard-level keyboard handling (e.g., "/" to open pane ticker browser)
+        let dashboard_keyboard = screen::dashboard::Dashboard::keyboard_subscription()
+            .map(|m| Message::Dashboard(None, m));
 
-        // Put global keyboard first for higher priority
-        Subscription::batch(vec![global_keyboard, exchange_streams, sidebar, window_events, tick])
+        // Note: TickerTable keyboard/timer is driven by dashboard update now; no global tables subscription required
+        let tables_subs = Subscription::none();
+
+        Subscription::batch(vec![
+            dashboard_keyboard,
+            tables_subs,
+            exchange_streams,
+            sidebar,
+            window_events,
+            tick,
+        ])
     }
 
     fn active_dashboard(&self) -> &Dashboard {

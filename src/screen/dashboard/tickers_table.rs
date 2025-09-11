@@ -8,7 +8,7 @@ use exchange::{
 };
 use iced::{
     Alignment, Element, Length, Renderer, Size, Subscription, Task, Theme,
-    alignment::{self, Horizontal, Vertical},
+    alignment::{Horizontal, Vertical},
     padding,
     widget::{
         Button, Space, Text, button, column, container, horizontal_rule, row,
@@ -20,12 +20,22 @@ use iced::{
 const ACTIVE_UPDATE_INTERVAL: u64 = 25;
 const INACTIVE_UPDATE_INTERVAL: u64 = 300;
 
-const TICKER_CARD_HEIGHT: f32 = 64.0;
-const SEARCH_BAR_HEIGHT: f32 = 120.0;
+// Compact browser layout
+const BROWSER_WIDTH: f32 = 412.0;
+const TICKER_CARD_HEIGHT: f32 = 33.6; // ~20% taller than 28.0
+const SEARCH_BAR_HEIGHT: f32 = 72.0;
+// Spacing and header constants for accurate visibility math
+const CARD_SPACING: f32 = 4.0;
+const EXCHANGE_FILTERS_ROW_HEIGHT: f32 = 32.0;
+const SORT_BUTTON_ROW_HEIGHT: f32 = 32.0;
+const MARKET_BUTTON_ROW_HEIGHT: f32 = 28.0;
+const SORT_COLUMN_SPACING: f32 = 4.0; // internal spacing inside sort column
+const COLUMN_SPACING_WITH_SORT: f32 = 8.0; // spacing between sections when sort is shown
+const COLUMN_SPACING_NO_SORT: f32 = 4.0; // spacing between sections when sort is hidden
+const HRULE_THICKNESS: f32 = 1.0;
 
 // Enhanced virtualization constants
-const VISIBLE_BUFFER: f32 = 1.5; // Render 1.5 screens worth of content
-const MIN_VISIBLE_BUFFER: f32 = 0.5; // Minimum buffer for smooth scrolling
+// Note: Using fixed buffer calculations instead of these constants for better stability
 
 pub fn fetch_tickers_info() -> Task<Message> {
     let fetch_tasks = Exchange::ALL
@@ -150,11 +160,17 @@ pub struct TickersTable {
     // Keyboard navigation
     focused_index: Option<usize>,
     selected_chart_type: Option<ChartType>,
+    // Shared favorites provided by dashboard; kept in a fast lookup map
+    favorites_map: HashMap<Exchange, std::collections::HashSet<Ticker>>,
 }
 
 impl TickersTable {
-    pub fn new(_favorited_tickers: Vec<(Exchange, Ticker)>) -> (Self, Task<Message>) {
-        // Note: favorited_tickers will be handled during data updates
+    pub fn new(favorited_tickers: Vec<(Exchange, Ticker)>) -> (Self, Task<Message>) {
+        // Build favorites map from provided list
+        let mut favorites_map: HashMap<Exchange, std::collections::HashSet<Ticker>> = HashMap::new();
+        for (ex, tk) in favorited_tickers {
+            favorites_map.entry(ex).or_default().insert(tk);
+        }
 
         (
             Self {
@@ -178,9 +194,37 @@ impl TickersTable {
                 pending_requests: std::collections::HashSet::new(),
                 focused_index: None,
                 selected_chart_type: Some(ChartType::Candlestick), // Default to candlestick
+                favorites_map,
             },
             fetch_tickers_info(),
         )
+    }
+
+    pub fn set_favorites(&mut self, favorited_tickers: &[(Exchange, Ticker)]) {
+        // Rebuild shared favorites map
+        let mut new_map: HashMap<Exchange, std::collections::HashSet<Ticker>> = HashMap::new();
+        for (ex, tk) in favorited_tickers {
+            new_map.entry(*ex).or_default().insert(*tk);
+        }
+        self.favorites_map = new_map;
+
+        // Reflect into current entries so Favorites tab and icons update immediately
+        for (exchange, entries) in self.ticker_data.iter_mut() {
+            let set = self
+                .favorites_map
+                .get(exchange)
+                .cloned()
+                .unwrap_or_default();
+            for entry in entries.iter_mut() {
+                entry.is_favorite = set.contains(&entry.ticker);
+                entry.display_data = None; // invalidate display cache
+            }
+        }
+
+        // Invalidate caches since filtering may have changed
+        self.cached_sort_option = None;
+        self.cached_sorted_indices.clear();
+        self.needs_filter_update = true;
     }
 
     pub fn update_table(&mut self, exchange: Exchange, ticker_stats: HashMap<Ticker, TickerStats>) {
@@ -196,16 +240,21 @@ impl TickersTable {
             }
         }
 
-        // Create new entries with preserved favorites
+        // Create new entries with preserved favorites and apply shared favorites
         let entries: Vec<TickerEntry> = ticker_stats
             .into_iter()
             .map(|(ticker, stats)| {
                 let (symbol, _) = ticker.to_full_symbol_and_type();
+                let shared_fav = self
+                    .favorites_map
+                    .get(&exchange)
+                    .map(|set| set.contains(&ticker))
+                    .unwrap_or(false);
                 TickerEntry {
                     ticker,
                     stats,
-                    is_favorite: *favorites_map.get(&ticker).unwrap_or(&false),
-                    display_data: None, // Lazy compute
+                    is_favorite: *favorites_map.get(&ticker).unwrap_or(&false) || shared_fav,
+                    display_data: Some(Self::compute_display_data(&ticker, &stats)), // Pre-compute for performance
                     search_string: symbol, // Pre-compute for fast searching
                 }
             })
@@ -456,6 +505,13 @@ impl TickersTable {
                 }
             }
         }
+        // Update shared favorites map
+        let set = self.favorites_map.entry(exchange).or_default();
+        if set.contains(&ticker) {
+            set.remove(&ticker);
+        } else {
+            set.insert(ticker);
+        }
         // Invalidate caches since filtering may have changed
         self.cached_sort_option = None;
         self.cached_sorted_indices.clear();
@@ -463,28 +519,28 @@ impl TickersTable {
     }
 
     pub fn favorited_tickers(&self) -> Vec<(Exchange, Ticker)> {
-        let mut favorites = Vec::new();
-        for (exchange, entries) in &self.ticker_data {
-            for entry in entries {
-                if entry.is_favorite {
-                    favorites.push((*exchange, entry.ticker));
-                }
+        // Prefer the shared favorites map as the source of truth
+        let mut out: Vec<(Exchange, Ticker)> = Vec::new();
+        for (ex, set) in &self.favorites_map {
+            for tk in set {
+                out.push((*ex, *tk));
             }
         }
-        favorites
+        out
     }
 
     fn compute_display_data(ticker: &Ticker, stats: &TickerStats) -> TickerDisplayData {
         let (ticker_str, market) = ticker.display_symbol_and_type();
+        
+        // Optimize string operations
         let display_ticker = if ticker_str.len() >= 11 {
-            ticker_str[..9].to_string() + "..."
+            format!("{}...", &ticker_str[..9])
         } else {
-            ticker_str + {
-                match market {
-                    MarketKind::Spot => "",
-                    MarketKind::LinearPerps | MarketKind::InversePerps => "P",
-                }
-            }
+            let suffix = match market {
+                MarketKind::Spot => "",
+                MarketKind::LinearPerps | MarketKind::InversePerps => "P",
+            };
+            format!("{}{}", ticker_str, suffix)
         };
 
         TickerDisplayData {
@@ -492,7 +548,7 @@ impl TickersTable {
             price_change_display: data::util::pct_change(stats.daily_price_chg),
             volume_display: data::util::currency_abbr(stats.daily_volume),
             mark_price_display: stats.mark_price.to_string(),
-            card_color_alpha: { (stats.daily_price_chg / 8.0).clamp(-1.0, 1.0) },
+            card_color_alpha: (stats.daily_price_chg / 8.0).clamp(-1.0, 1.0),
         }
     }
 
@@ -523,9 +579,11 @@ impl TickersTable {
         is_focused: bool,
     ) -> Element<'a, Message> {
         if !is_visible {
-            return column![]
+            // Return a placeholder with consistent height
+            return container(column![])
                 .width(Length::Fill)
-                .height(Length::Fixed(60.0))
+                .height(Length::Fixed(TICKER_CARD_HEIGHT))
+                .style(style::ticker_card)
                 .into();
         }
 
@@ -538,8 +596,10 @@ impl TickersTable {
         let display_data = if let Some(ref data) = entry.display_data {
             data.clone()
         } else {
-            // Compute fresh for now - could be optimized with better caching later
-            Self::compute_display_data(ticker, &entry.stats)
+            // Compute and cache the display data
+            let computed_data = Self::compute_display_data(ticker, &entry.stats);
+            // Note: We can't mutate here, but this ensures we compute it once per render cycle
+            computed_data
         };
 
         if let Some((selected_ticker, selected_exchange)) = &self.expand_ticker_card {
@@ -554,44 +614,56 @@ impl TickersTable {
                 .style(style::ticker_card)
                 .into()
             } else {
-                create_ticker_card_with_focus(exchange, ticker, display_data.clone(), is_focused)
+                create_ticker_card_with_focus(exchange, ticker, display_data.clone(), is_focused, is_fav)
             }
         } else {
-            create_ticker_card_with_focus(exchange, ticker, display_data, is_focused)
+            create_ticker_card_with_focus(exchange, ticker, display_data, is_focused, is_fav)
         }
     }
 
 
 
     fn is_container_visible(&self, index: usize, bounds: Size) -> bool {
-        let item_top = SEARCH_BAR_HEIGHT + (index as f32 * TICKER_CARD_HEIGHT);
+        // Compute a conservative header height (everything above the ticker list)
+        let mut header_height = SEARCH_BAR_HEIGHT;
+        let section_spacing = if self.show_sort_options {
+            COLUMN_SPACING_WITH_SORT
+        } else {
+            COLUMN_SPACING_NO_SORT
+        };
+        // spacing between search bar and next section
+        header_height += section_spacing;
+        if self.show_sort_options {
+            // First row: sort buttons
+            header_height += SORT_BUTTON_ROW_HEIGHT;
+            // Optional market filter row for All/Bybit/Binance
+            let show_market_filters = matches!(
+                self.selected_tab,
+                TickerTab::All | TickerTab::Bybit | TickerTab::Binance
+            );
+            if show_market_filters {
+                header_height += MARKET_BUTTON_ROW_HEIGHT + SORT_COLUMN_SPACING;
+            }
+            // Horizontal rule and internal spacing
+            header_height += HRULE_THICKNESS + SORT_COLUMN_SPACING;
+            // spacing between sort section and exchange filter row
+            header_height += section_spacing;
+        }
+        // Exchange filters row (ALL/Bybit/Binance/HL/Favorites)
+        header_height += EXCHANGE_FILTERS_ROW_HEIGHT;
+
+        // Position of this item (include per-item spacing)
+        let item_top = header_height + (index as f32) * (TICKER_CARD_HEIGHT + CARD_SPACING);
         let item_bottom = item_top + TICKER_CARD_HEIGHT;
 
-        // Enhanced visibility calculation with dynamic buffer
-        let buffer_height = (bounds.height * VISIBLE_BUFFER).max(bounds.height + MIN_VISIBLE_BUFFER * TICKER_CARD_HEIGHT);
+        // Generous visibility calculation with large buffer to prevent disappearing cards
+        let buffer_height = bounds.height * 3.0; // 3x viewport height buffer
         let viewport_top = self.scroll_offset.y - buffer_height;
         let viewport_bottom = self.scroll_offset.y + bounds.height + buffer_height;
 
         item_bottom >= viewport_top && item_top <= viewport_bottom
     }
 
-    fn should_render_container(&self, index: usize, bounds: Size) -> bool {
-        let item_top = SEARCH_BAR_HEIGHT + (index as f32 * TICKER_CARD_HEIGHT);
-        let _item_bottom = item_top + TICKER_CARD_HEIGHT;
-
-        let viewport_top = self.scroll_offset.y;
-        let _viewport_bottom = self.scroll_offset.y + bounds.height;
-
-        // Adaptive rendering based on scroll velocity
-        let base_threshold = bounds.height * 1.5;
-        let velocity_factor = (self.scroll_velocity / 1000.0).min(2.0); // Cap at 2x
-        let distance_threshold = base_threshold * (1.0 + velocity_factor);
-
-        let item_center = item_top + TICKER_CARD_HEIGHT / 2.0;
-        let viewport_center = viewport_top + bounds.height / 2.0;
-
-        (item_center - viewport_center).abs() <= distance_threshold
-    }
 
     pub fn is_open(&self) -> bool {
         self.is_show
@@ -845,20 +917,24 @@ impl TickersTable {
         let filtered_tickers = self.get_filtered_tickers();
 
         let sorting_button = if self.show_sort_options {
-            button(icon_text(Icon::Sort, 14).align_x(Horizontal::Center))
+            button(icon_text(Icon::Sort, 16).align_x(Horizontal::Center))
                 .on_press(Message::ShowSortingOptions)
+                .width(Length::Fixed(36.0))
+                .height(Length::Fixed(36.0))
                 .style(|theme, status| style::button::transparent(theme, status, true))
         } else {
-            button(icon_text(Icon::Sort, 14).align_x(Horizontal::Center))
+            button(icon_text(Icon::Sort, 16).align_x(Horizontal::Center))
                 .on_press(Message::ShowSortingOptions)
+                .width(Length::Fixed(36.0))
+                .height(Length::Fixed(36.0))
                 .style(|theme, status| style::button::transparent(theme, status, false))
         };
 
         let search_bar_row = row![
-            text_input("Search for a ticker...", &self.normalized_search)
+            text_input("Search all markets", &self.normalized_search)
                 .style(style::search_input)
+                .padding(padding::left(10).right(10).top(8).bottom(8))
                 .on_input(|value| {
-                    // Filter out "/" character to prevent it from being entered in search
                     let filtered_value = value.replace("/", "");
                     Message::UpdateSearchQuery(filtered_value)
                 })
@@ -866,7 +942,8 @@ impl TickersTable {
             sorting_button
         ]
         .align_y(Vertical::Center)
-        .spacing(4);
+        .spacing(8)
+        .height(Length::Fixed(SEARCH_BAR_HEIGHT));
 
         let sort_options_column = {
             // Only show market filters for exchanges that support them
@@ -874,55 +951,58 @@ impl TickersTable {
             let show_linear = matches!(self.selected_tab, TickerTab::All | TickerTab::Bybit | TickerTab::Binance);
             let show_inverse = matches!(self.selected_tab, TickerTab::All | TickerTab::Bybit | TickerTab::Binance);
             
-            let spot_market_button = button(text("Spot"))
+            let spot_market_button = button(text("Spot").align_x(Horizontal::Center))
                 .on_press(Message::SetMarketFilter(Some(MarketKind::Spot)))
                 .style(|theme, status| style::button::transparent(theme, status, false));
 
-            let linear_markets_btn = button(text("Linear"))
+            let linear_markets_btn = button(text("Linear").align_x(Horizontal::Center))
                 .on_press(Message::SetMarketFilter(Some(MarketKind::LinearPerps)))
                 .style(|theme, status| style::button::transparent(theme, status, false));
 
-            let inverse_markets_btn = button(text("Inverse"))
+            let inverse_markets_btn = button(text("Inverse").align_x(Horizontal::Center))
                 .on_press(Message::SetMarketFilter(Some(MarketKind::InversePerps)))
                 .style(|theme, status| style::button::transparent(theme, status, false));
 
-            let volume_sort_button = button(
+            let volume_content = row![
+                Space::new(Length::Fill, Length::Shrink),
                 row![
-                    text("Volume"),
+                    text("Volume").align_x(Horizontal::Center),
                     icon_text(
-                        if self.selected_sort_option == SortOptions::VolumeDesc {
-                            Icon::SortDesc
-                        } else {
-                            Icon::SortAsc
-                        },
+                        if self.selected_sort_option == SortOptions::VolumeDesc { Icon::SortDesc } else { Icon::SortAsc },
                         14
                     )
                 ]
-                .spacing(4)
+                .spacing(6)
                 .align_y(Vertical::Center),
-            )
-            .on_press(Message::ChangeSortOption(SortOptions::VolumeAsc));
+                Space::new(Length::Fill, Length::Shrink),
+            ];
 
-            let change_sort_button = button(
+            let volume_sort_button = button(volume_content)
+            .on_press(Message::ChangeSortOption(SortOptions::VolumeAsc))
+            .width(Length::Fill)
+            .height(Length::Fixed(32.0));
+
+            let change_content = row![
+                Space::new(Length::Fill, Length::Shrink),
                 row![
-                    text("Change"),
+                    text("Change").align_x(Horizontal::Center),
                     icon_text(
-                        if self.selected_sort_option == SortOptions::ChangeDesc {
-                            Icon::SortDesc
-                        } else {
-                            Icon::SortAsc
-                        },
+                        if self.selected_sort_option == SortOptions::ChangeDesc { Icon::SortDesc } else { Icon::SortAsc },
                         14
                     )
                 ]
-                .spacing(4)
+                .spacing(6)
                 .align_y(Vertical::Center),
-            )
-            .on_press(Message::ChangeSortOption(SortOptions::ChangeAsc));
+                Space::new(Length::Fill, Length::Shrink),
+            ];
+
+            let change_sort_button = button(change_content)
+            .on_press(Message::ChangeSortOption(SortOptions::ChangeAsc))
+            .width(Length::Fill)
+            .height(Length::Fixed(32.0));
 
             column![
                 row![
-                    Space::new(Length::FillPortion(2), Length::Shrink),
                     volume_sort_button.style({
                         let selected_option = self.selected_sort_option.clone();
                         move |theme, status| {
@@ -936,7 +1016,6 @@ impl TickersTable {
                             )
                         }
                     }),
-                    Space::new(Length::FillPortion(1), Length::Shrink),
                     change_sort_button.style({
                         let selected_option = self.selected_sort_option.clone();
                         move |theme, status| {
@@ -950,45 +1029,51 @@ impl TickersTable {
                             )
                         }
                     }),
-                    Space::new(Length::FillPortion(2), Length::Shrink),
-                ],
+                ]
+                .spacing(8),
                 if show_spot || show_linear || show_inverse {
                     row![
-                        Space::new(Length::FillPortion(1), Length::Shrink),
-                        spot_market_button.style({
-                            let selected_market = self.selected_market;
-                            move |theme, status| {
-                                style::button::transparent(
-                                    theme,
-                                    status,
-                                    matches!(selected_market, Some(MarketKind::Spot)),
-                                )
-                            }
-                        }),
-                        Space::new(Length::FillPortion(1), Length::Shrink),
-                        linear_markets_btn.style({
-                            let selected_market = self.selected_market;
-                            move |theme, status| {
-                                style::button::transparent(
-                                    theme,
-                                    status,
-                                    matches!(selected_market, Some(MarketKind::LinearPerps)),
-                                )
-                            }
-                        }),
-                        Space::new(Length::FillPortion(1), Length::Shrink),
-                        inverse_markets_btn.style({
-                            let selected_market = self.selected_market;
-                            move |theme, status| {
-                                style::button::transparent(
-                                    theme,
-                                    status,
-                                    matches!(selected_market, Some(MarketKind::InversePerps)),
-                                )
-                            }
-                        }),
-                        Space::new(Length::FillPortion(1), Length::Shrink),
+                        spot_market_button
+                            .width(Length::FillPortion(1))
+                            .height(Length::Fixed(28.0))
+                            .style({
+                                let selected_market = self.selected_market;
+                                move |theme, status| {
+                                    style::button::transparent(
+                                        theme,
+                                        status,
+                                        matches!(selected_market, Some(MarketKind::Spot)),
+                                    )
+                                }
+                            }),
+                        linear_markets_btn
+                            .width(Length::FillPortion(1))
+                            .height(Length::Fixed(28.0))
+                            .style({
+                                let selected_market = self.selected_market;
+                                move |theme, status| {
+                                    style::button::transparent(
+                                        theme,
+                                        status,
+                                        matches!(selected_market, Some(MarketKind::LinearPerps)),
+                                    )
+                                }
+                            }),
+                        inverse_markets_btn
+                            .width(Length::FillPortion(1))
+                            .height(Length::Fixed(28.0))
+                            .style({
+                                let selected_market = self.selected_market;
+                                move |theme, status| {
+                                    style::button::transparent(
+                                        theme,
+                                        status,
+                                        matches!(selected_market, Some(MarketKind::InversePerps)),
+                                    )
+                                }
+                            }),
                     ]
+                    .spacing(8)
                 } else {
                     row![]
                 },
@@ -998,38 +1083,44 @@ impl TickersTable {
         };
 
         let exchange_filters_row = {
-            let all_button = create_tab_button(text("ALL").size(16), &self.selected_tab, TickerTab::All);
+            let all_button = create_tab_button(text("ALL").size(16).align_x(Horizontal::Center), &self.selected_tab, TickerTab::All)
+                .width(Length::FillPortion(1))
+                .height(Length::Fixed(32.0));
             let bybit_button =
-                create_tab_button(icon_text(Icon::BybitLogo, 18), &self.selected_tab, TickerTab::Bybit);
+                create_tab_button(icon_text(Icon::BybitLogo, 18).align_x(Horizontal::Center), &self.selected_tab, TickerTab::Bybit)
+                    .width(Length::FillPortion(1))
+                    .height(Length::Fixed(32.0));
             let binance_button =
-                create_tab_button(icon_text(Icon::BinanceLogo, 18), &self.selected_tab, TickerTab::Binance);
+                create_tab_button(icon_text(Icon::BinanceLogo, 18).align_x(Horizontal::Center), &self.selected_tab, TickerTab::Binance)
+                    .width(Length::FillPortion(1))
+                    .height(Length::Fixed(32.0));
             let hyperliquid_button =
-                create_tab_button(icon_text(Icon::HyperliquidLogo, 16), &self.selected_tab, TickerTab::Hyperliquid);
+                create_tab_button(icon_text(Icon::HyperliquidLogo, 16).align_x(Horizontal::Center), &self.selected_tab, TickerTab::Hyperliquid)
+                    .width(Length::FillPortion(1))
+                    .height(Length::Fixed(32.0));
             let favorites_button = create_tab_button(
-                icon_text(Icon::StarFilled, 18),
+                icon_text(Icon::StarFilled, 18).align_x(Horizontal::Center),
                 &self.selected_tab,
                 TickerTab::Favorites,
-            );
+            )
+            .width(Length::FillPortion(1))
+            .height(Length::Fixed(32.0));
 
             row![
                 favorites_button,
-                Space::new(Length::Fixed(4.0), Length::Shrink),
                 all_button,
-                Space::new(Length::Fixed(4.0), Length::Shrink),
                 bybit_button,
-                Space::new(Length::Fixed(4.0), Length::Shrink),
                 binance_button,
-                Space::new(Length::Fixed(4.0), Length::Shrink),
                 hyperliquid_button,
-                Space::new(Length::Fill, Length::Shrink),
             ]
-            .spacing(4)
+            .spacing(8)
+            .width(Length::Fill)
         };
 
-        let mut content = column![search_bar_row,]
-            .spacing(8)
-            .padding(padding::right(8))
-            .width(Length::Fill);
+        let mut content = column![search_bar_row]
+            .spacing(if self.show_sort_options { 8 } else { 4 })
+            .padding(padding::right(10).left(10))
+            .width(Length::Fixed(BROWSER_WIDTH));
 
         if self.show_sort_options {
             content = content.push(sort_options_column);
@@ -1039,35 +1130,45 @@ impl TickersTable {
 
         let mut ticker_cards = column![].spacing(4);
 
-        // Use pre-filtered and sorted data with enhanced virtualization
+        // Use pre-filtered and sorted data with simplified virtualization
         for (index, (exchange, entry_index)) in filtered_tickers.iter().enumerate() {
-            let should_render = self.should_render_container(index, bounds);
             let is_focused = Some(index) == self.focused_index;
-
-            if should_render {
-                let is_visible = self.is_container_visible(index, bounds);
-                let entry = &self.ticker_data[exchange][*entry_index];
-                ticker_cards = ticker_cards.push(self.create_ticker_container_with_focus(
-                    is_visible, *exchange, &entry.ticker, entry.is_favorite, is_focused,
-                ));
-            } else {
-                // Skip rendering items that are too far from viewport
-                ticker_cards = ticker_cards.push(column![]
-                    .width(Length::Fill)
-                    .height(Length::Fixed(TICKER_CARD_HEIGHT)));
-            }
+            let entry = &self.ticker_data[exchange][*entry_index];
+            
+            // Always render the card, but use visibility to determine content detail
+            let is_visible = self.is_container_visible(index, bounds);
+            ticker_cards = ticker_cards.push(self.create_ticker_container_with_focus(
+                is_visible, *exchange, &entry.ticker, entry.is_favorite, is_focused,
+            ));
         }
 
         content = content.push(ticker_cards);
 
-        scrollable::Scrollable::with_direction(
-            content,
-            scrollable::Direction::Vertical(
-                scrollable::Scrollbar::new().width(8).scroller_width(6),
-            ),
+        container(
+            scrollable::Scrollable::with_direction(
+                content,
+                scrollable::Direction::Vertical(
+                    scrollable::Scrollbar::new().width(8).scroller_width(6),
+                ),
+            )
+            .on_scroll(Message::Scrolled)
+            .style(style::scroll_bar)
         )
-        .on_scroll(Message::Scrolled)
-        .style(style::scroll_bar)
+        .width(Length::Fixed(BROWSER_WIDTH))
+        .height(Length::Fill)
+        .style(|theme: &Theme| {
+            let palette = theme.extended_palette();
+            iced::widget::container::Style {
+                background: Some(iced::Background::Color(palette.background.base.color.scale_alpha(0.98))),
+                text_color: Some(palette.background.base.text),
+                border: iced::Border {
+                    width: 1.0,
+                    color: palette.background.weak.color,
+                    radius: 6.0.into(),
+                },
+                ..Default::default()
+            }
+        })
         .into()
     }
 
@@ -1079,11 +1180,15 @@ impl TickersTable {
         }))
         .map(|_| Message::FetchForTickerStats(None));
 
-        let keyboard = iced::keyboard::on_key_press(|key, modifiers| {
-            Some(Message::KeyboardNavigate(key, modifiers))
-        });
+        timer
+    }
 
-        Subscription::batch(vec![timer, keyboard])
+    // A 'static subscription usable when a table is known to be open; avoids borrowing self
+    pub fn open_subscription() -> Subscription<Message> {
+        let timer = iced::time::every(std::time::Duration::from_secs(ACTIVE_UPDATE_INTERVAL))
+            .map(|_| Message::FetchForTickerStats(None));
+
+        timer
     }
 }
 
@@ -1094,74 +1199,99 @@ fn create_ticker_card_with_focus(
     ticker: &Ticker,
     display_data: TickerDisplayData,
     is_focused: bool,
+    is_fav: bool,
 ) -> Element<'static, Message> {
-    let color_column = container(column![])
-        .height(Length::Fill)
-        .width(Length::Fixed(2.0))
-        .style({
-            let alpha = display_data.card_color_alpha;
-            move |theme| style::ticker_card_bar(theme, alpha)
-        });
+    // Left clickable area: icon + ticker name + volume
+    let left_click_area = button(
+        row![
+            match exchange {
+                Exchange::BybitInverse
+                | Exchange::BybitLinear
+                | Exchange::BybitSpot => icon_text(Icon::BybitLogo, 12),
+                Exchange::BinanceInverse
+                | Exchange::BinanceLinear
+                | Exchange::BinanceSpot => icon_text(Icon::BinanceLogo, 12),
+                Exchange::HyperliquidPerps => icon_text(Icon::HyperliquidLogo, 10),
+            },
+            Space::new(Length::Fixed(6.0), Length::Shrink),
+            text(display_data.display_ticker.clone()).style(move |theme: &Theme| {
+                // Contrast-safe color: blend from the theme's base text color toward success/danger
+                // based on daily change magnitude. This ensures readability on light/dark themes.
+                let palette = theme.extended_palette();
+                let magnitude = display_data.card_color_alpha.abs().clamp(0.0, 1.0);
+                let threshold = 0.15; // ignore tiny moves
 
-    // Add focus indicator styling
-    let focus_style = if is_focused {
-        |theme: &iced::Theme, status: iced::widget::button::Status| {
-            let mut base = style::button::ticker_card(theme, status);
-            // Add focus ring effect
+                let base = palette.background.base.text; // guaranteed high-contrast text color
+                let target = if display_data.card_color_alpha >= 0.0 {
+                    palette.success.strong.color
+                } else {
+                    palette.danger.strong.color
+                };
+
+                let t = if magnitude <= threshold {
+                    0.0
+                } else {
+                    ((magnitude - threshold) / (1.0 - threshold)).clamp(0.0, 1.0)
+                };
+
+                // Lerp from base text color -> target accent
+                let color = iced::Color {
+                    r: base.r + (target.r - base.r) * t,
+                    g: base.g + (target.g - base.g) * t,
+                    b: base.b + (target.b - base.b) * t,
+                    a: base.a + (target.a - base.a) * t,
+                };
+
+                let mut st = iced::widget::text::Style::default();
+                st.color = Some(color);
+                st
+            }),
+            Space::new(Length::Fill, Length::Shrink),
+            text(display_data.volume_display.clone()),
+        ]
+        .align_y(Alignment::Center)
+        .spacing(4),
+    )
+    .style(|theme, status| style::button::transparent(theme, status, false))
+    .on_press(Message::ExpandTickerCard(Some((*ticker, exchange))));
+
+    let fav_icon = if is_fav {
+        icon_text(Icon::StarFilled, 12).style(|_theme: &Theme| {
+            let mut st = iced::widget::text::Style::default();
+            st.color = Some(iced::Color::from_rgb(120.0/255.0, 86.0/255.0, 255.0/255.0));
+            st
+        })
+    } else {
+        icon_text(Icon::Star, 12)
+    };
+
+    let fav_button = button(fav_icon)
+        .style(|theme, status| style::button::transparent(theme, status, false))
+        .on_press(Message::FavoriteTicker(exchange, *ticker));
+
+    let focused = is_focused;
+    container(
+        row![
+            left_click_area.width(Length::Fill),
+            Space::new(Length::Fixed(0.0), Length::Shrink),
+            fav_button,
+        ]
+        .align_y(Alignment::Center)
+        .spacing(2)
+        .padding(padding::left(8).right(6).top(4).bottom(4)),
+    )
+    .style(move |theme: &Theme| {
+        let mut base = style::ticker_card(theme);
+        if focused {
             base.border = iced::Border {
-                color: iced::Color::from_rgb(0.2, 0.6, 1.0), // Blue focus color
+                color: iced::Color::from_rgb(120.0/255.0, 86.0/255.0, 255.0/255.0),
                 width: 2.0,
                 radius: base.border.radius,
             };
-            base
         }
-    } else {
-        |theme: &iced::Theme, status: iced::widget::button::Status| {
-            style::button::ticker_card(theme, status)
-        }
-    };
-
-    container(
-        button(
-            row![
-                color_column,
-                column![
-                    row![
-                        row![
-                            match exchange {
-                                Exchange::BybitInverse
-                                | Exchange::BybitLinear
-                                | Exchange::BybitSpot => icon_text(Icon::BybitLogo, 12),
-                                Exchange::BinanceInverse
-                                | Exchange::BinanceLinear
-                                | Exchange::BinanceSpot => icon_text(Icon::BinanceLogo, 12),
-                                Exchange::HyperliquidPerps => icon_text(Icon::HyperliquidLogo, 10),
-                            },
-                            text(display_data.display_ticker.clone()),
-                        ]
-                        .spacing(2)
-                        .align_y(alignment::Vertical::Center),
-                        Space::new(Length::Fill, Length::Shrink),
-                        text(display_data.price_change_display.clone()),
-                    ]
-                    .spacing(4)
-                    .align_y(alignment::Vertical::Center),
-                    row![
-                        text(display_data.mark_price_display.clone()),
-                        Space::new(Length::Fill, Length::Shrink),
-                        text(display_data.volume_display.clone()),
-                    ]
-                    .spacing(4),
-                ]
-                .padding(padding::left(8).right(8).bottom(4).top(4))
-                .spacing(4),
-            ]
-            .align_y(Alignment::Center),
-        )
-        .style(focus_style)
-        .on_press(Message::ExpandTickerCard(Some((*ticker, exchange)))),
-    )
-    .height(Length::Fixed(56.0))
+        base
+    })
+    .height(Length::Fixed(TICKER_CARD_HEIGHT))
     .into()
 }
 
@@ -1181,12 +1311,6 @@ fn create_chart_type_button(
         ChartType::TimeAndSales => "time&sales",
     };
 
-    let width = if chart_type == ChartType::TimeAndSales {
-        Length::Fixed(160.0)
-    } else {
-        Length::Fixed(180.0)
-    };
-
     // For chart type buttons, we want to keep the expanded view open
     // so users can select multiple chart types
     let button = button(text(label.to_string()).align_x(Horizontal::Center))
@@ -1195,7 +1319,8 @@ fn create_chart_type_button(
             exchange,
             chart_type_str.to_string()
         ))
-        .width(width);
+        .width(Length::Fill)
+        .height(Length::Fixed(28.0));
 
     if is_selected {
         button.style(|theme: &iced::Theme, status: iced::widget::button::Status| {
@@ -1222,78 +1347,111 @@ fn create_expanded_ticker_card(
 ) -> Element<'static, Message> {
     let (ticker_str, market) = ticker.display_symbol_and_type();
 
-    column![
-        row![
-            button(icon_text(Icon::Return, 11))
-                .on_press(Message::ExpandTickerCard(None))
-                .style(|theme, status| style::button::transparent(theme, status, false)),
-            button(if is_fav {
-                icon_text(Icon::StarFilled, 11)
-            } else {
-                icon_text(Icon::Star, 11)
+    // Pre-compute color for daily change text (using same scheme as display_ticker)
+    let change_style = move |theme: &Theme| {
+        // Contrast-safe color: blend from the theme's base text color toward success/danger
+        // based on daily change magnitude. This ensures readability on light/dark themes.
+        let palette = theme.extended_palette();
+        let magnitude = display_data.card_color_alpha.abs().clamp(0.0, 1.0);
+        let threshold = 0.15; // ignore tiny moves
+
+        let base = palette.background.base.text; // guaranteed high-contrast text color
+        let target = if display_data.card_color_alpha >= 0.0 {
+            palette.success.strong.color
+        } else {
+            palette.danger.strong.color
+        };
+
+        let t = if magnitude <= threshold {
+            0.0
+        } else {
+            ((magnitude - threshold) / (1.0 - threshold)).clamp(0.0, 1.0)
+        };
+
+        // Lerp from base text color -> target accent
+        let color = iced::Color {
+            r: base.r + (target.r - base.r) * t,
+            g: base.g + (target.g - base.g) * t,
+            b: base.b + (target.b - base.b) * t,
+            a: base.a + (target.a - base.a) * t,
+        };
+        
+        let mut s = iced::widget::text::Style::default();
+        s.color = Some(color);
+        s
+    };
+
+    // Top bar with back + fav and title line
+    let header = row![
+        button(icon_text(Icon::Return, 12))
+            .on_press(Message::ExpandTickerCard(None))
+            .style(|theme, status| style::button::transparent(theme, status, false)),
+        button(if is_fav {
+            icon_text(Icon::StarFilled, 12).style(|_theme: &Theme| {
+                let mut st = iced::widget::text::Style::default();
+                st.color = Some(iced::Color::from_rgb(120.0/255.0, 86.0/255.0, 255.0/255.0));
+                st
             })
+        } else { icon_text(Icon::Star, 12) })
             .on_press(Message::FavoriteTicker(exchange, *ticker))
             .style(|theme, status| style::button::transparent(theme, status, false)),
-        ]
-        .spacing(2),
+        Space::new(Length::Fixed(8.0), Length::Shrink),
+        match exchange {
+            Exchange::BybitInverse | Exchange::BybitLinear | Exchange::BybitSpot => icon_text(Icon::BybitLogo, 12),
+            Exchange::BinanceInverse | Exchange::BinanceLinear | Exchange::BinanceSpot => icon_text(Icon::BinanceLogo, 12),
+            Exchange::HyperliquidPerps => icon_text(Icon::HyperliquidLogo, 10),
+        },
+        text(format!("{} {}{}", ticker_str, market.to_string(), match market { MarketKind::Spot => "", MarketKind::LinearPerps | MarketKind::InversePerps => " Perp" })).size(14),
+    ]
+    .align_y(Alignment::Center)
+    .spacing(6);
+
+    // Stats row: three columns aligned
+    let stats = column![
         row![
-            match exchange {
-                Exchange::BybitInverse | Exchange::BybitLinear | Exchange::BybitSpot =>
-                    icon_text(Icon::BybitLogo, 12),
-                Exchange::BinanceInverse | Exchange::BinanceLinear | Exchange::BinanceSpot =>
-                    icon_text(Icon::BinanceLogo, 12),
-                Exchange::HyperliquidPerps =>
-                    icon_text(Icon::HyperliquidLogo, 10),
-            },
-            text(
-                ticker_str
-                    + " "
-                    + &market.to_string()
-                    + match market {
-                        MarketKind::Spot => "",
-                        MarketKind::LinearPerps | MarketKind::InversePerps => " Perp",
-                    }
-            ),
-        ]
-        .spacing(2),
-        container(
-            column![
-                row![
-                    text("Last Updated Price: ").size(11),
-                    Space::new(Length::Fill, Length::Shrink),
-                    text(display_data.mark_price_display.clone())
-                ],
-                row![
-                    text("Daily Change: ").size(11),
-                    Space::new(Length::Fill, Length::Shrink),
-                    text(display_data.price_change_display.clone()),
-                ],
-                row![
-                    text("Daily Volume: ").size(11),
-                    Space::new(Length::Fill, Length::Shrink),
-                    text(display_data.volume_display.clone()),
-                ],
-            ]
-            .spacing(2)
-        )
-        .style(|theme: &Theme| {
+            text("Last Updated Price:").size(11),
+            Space::new(Length::Fill, Length::Shrink),
+            text(display_data.mark_price_display.clone()).size(12),
+        ],
+        row![
+            text("Daily Change:").size(11),
+            Space::new(Length::Fill, Length::Shrink),
+            text(display_data.price_change_display.clone()).style(change_style).size(12),
+        ],
+        row![
+            text("Daily Volume:").size(11),
+            Space::new(Length::Fill, Length::Shrink),
+            text(display_data.volume_display.clone()).size(12),
+        ],
+    ]
+    .spacing(4)
+    .padding(padding::left(4).right(4));
+
+    // Chart buttons stacked, full width
+    let chart_buttons = column![
+        create_chart_type_button("Heatmap Chart", ChartType::Heatmap, ticker, exchange, selected_chart_type),
+        create_chart_type_button("Footprint Chart", ChartType::Footprint, ticker, exchange, selected_chart_type),
+        create_chart_type_button("Candlestick Chart", ChartType::Candlestick, ticker, exchange, selected_chart_type),
+        create_chart_type_button("Time&Sales", ChartType::TimeAndSales, ticker, exchange, selected_chart_type),
+    ]
+    .spacing(6)
+    .width(Length::Fill);
+
+    column![
+        header,
+        Space::new(Length::Shrink, Length::Fixed(6.0)),
+        container(stats).style(|theme: &Theme| {
             let palette = theme.extended_palette();
             iced::widget::container::Style {
-                text_color: Some(palette.background.base.text.scale_alpha(0.9)),
+                text_color: Some(palette.background.base.text.scale_alpha(0.95)),
                 ..Default::default()
             }
         }),
-        column![
-            create_chart_type_button("Heatmap Chart", ChartType::Heatmap, ticker, exchange, selected_chart_type),
-            create_chart_type_button("Footprint Chart", ChartType::Footprint, ticker, exchange, selected_chart_type),
-            create_chart_type_button("Candlestick Chart", ChartType::Candlestick, ticker, exchange, selected_chart_type),
-            create_chart_type_button("Time&Sales", ChartType::TimeAndSales, ticker, exchange, selected_chart_type),
-        ]
-        .width(Length::Fill)
-        .spacing(2),
+        Space::new(Length::Shrink, Length::Fixed(6.0)),
+        chart_buttons,
     ]
-    .padding(padding::top(8).right(16).left(16).bottom(16))
-    .spacing(12)
+    .padding(padding::top(8).right(12).left(12).bottom(12))
+    .spacing(8)
     .into()
 }
 
@@ -1305,7 +1463,7 @@ fn create_tab_button<'a>(
     let mut btn =
         button(text)
             .style(|theme, status| style::button::transparent(theme, status, false))
-            .padding(padding::left(4).right(4).top(2).bottom(2));
+            .padding(padding::left(8).right(8).top(6).bottom(6));
     if *current_tab != target_tab {
         btn = btn.on_press(Message::ChangeTickersTableTab(target_tab));
     }

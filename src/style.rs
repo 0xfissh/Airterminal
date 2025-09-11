@@ -154,7 +154,7 @@ pub mod button {
                 _ => None,
             },
             border: Border {
-                radius: 3.0.into(),
+                radius: 6.0.into(),
                 ..Default::default()
             },
             ..Default::default()
@@ -180,7 +180,7 @@ pub mod button {
                 _ => None,
             },
             border: Border {
-                radius: 3.0.into(),
+                radius: 6.0.into(),
                 ..Default::default()
             },
             ..Default::default()
@@ -208,7 +208,7 @@ pub mod button {
         Style {
             text_color: palette.background.base.text,
             border: Border {
-                radius: 3.0.into(),
+                radius: 6.0.into(),
                 ..Default::default()
             },
             background: match status {
@@ -239,7 +239,7 @@ pub mod button {
         Style {
             text_color: palette.background.base.text,
             border: Border {
-                radius: 3.0.into(),
+                radius: 6.0.into(),
                 ..Default::default()
             },
             background: match status {
@@ -279,7 +279,7 @@ pub mod button {
                 background: Some(palette.background.weak.color.into()),
                 border: Border {
                     width: 1.0,
-                    radius: 2.0.into(),
+                    radius: 6.0.into(),
                     color,
                 },
                 ..Default::default()
@@ -289,7 +289,7 @@ pub mod button {
                 text_color: palette.background.base.text,
                 border: Border {
                     width: 1.0,
-                    radius: 2.0.into(),
+                    radius: 6.0.into(),
                     color: color.scale_alpha(0.8),
                 },
                 ..Default::default()
@@ -491,7 +491,7 @@ pub fn search_input(
     widget::text_input::Style {
         background: background.into(),
         border: Border {
-            radius: 3.0.into(),
+            radius: 6.0.into(),
             width: 1.0,
             color: border_color,
         },
@@ -514,7 +514,7 @@ pub fn ticker_card(theme: &Theme) -> Style {
             }
         },
         border: Border {
-            radius: 4.0.into(),
+            radius: 6.0.into(),
             width: 1.0,
             color: palette.background.strong.color,
         },
@@ -522,30 +522,6 @@ pub fn ticker_card(theme: &Theme) -> Style {
     }
 }
 
-// the bar that lights up depending on the price change
-pub fn ticker_card_bar(theme: &Theme, color_alpha: f32) -> Style {
-    let palette = theme.extended_palette();
-
-    Style {
-        background: {
-            if color_alpha > 0.0 {
-                Some(palette.success.strong.color.scale_alpha(color_alpha).into())
-            } else {
-                Some(palette.danger.strong.color.scale_alpha(-color_alpha).into())
-            }
-        },
-        border: Border {
-            radius: 4.0.into(),
-            width: 1.0,
-            color: if color_alpha > 0.0 {
-                palette.success.strong.color.scale_alpha(color_alpha)
-            } else {
-                palette.danger.strong.color.scale_alpha(-color_alpha)
-            },
-        },
-        ..Default::default()
-    }
-}
 
 // Scrollable
 pub fn scroll_bar(theme: &Theme, status: widget::scrollable::Status) -> widget::scrollable::Style {
@@ -567,14 +543,14 @@ pub fn scroll_bar(theme: &Theme, status: widget::scrollable::Status) -> widget::
     let rail = Rail {
         background: Some(iced::Background::Color(rail_bg)),
         border: Border {
-            radius: 2.0.into(),
+            radius: 6.0.into(),
             width: 1.0,
             color: Color::TRANSPARENT,
         },
         scroller: Scroller {
             color: scroller_bg,
             border: Border {
-                radius: 2.0.into(),
+                radius: 6.0.into(),
                 width: 0.0,
                 color: Color::TRANSPARENT,
             },

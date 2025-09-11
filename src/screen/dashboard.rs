@@ -22,10 +22,11 @@ use exchange::{
 };
 
 use iced::{
-    Element, Length, Subscription, Task, Vector,
+    Alignment, Element, Length, Rectangle, Subscription, Task, Vector,
+    padding,
     task::{Straw, sipper},
     widget::{
-        PaneGrid, center, container,
+        PaneGrid, center, container, mouse_area, opaque, responsive,
         pane_grid::{self, Configuration},
     },
 };
@@ -41,6 +42,8 @@ pub enum Message {
     Notification(Toast),
     LayoutFetchAll,
     RefreshStreams,
+    // Global keyboard events handled at dashboard level (e.g., "/" to open ticker browser)
+    KeyPressed(iced::keyboard::Key, iced::keyboard::Modifiers),
     ChartRequestedFetch {
         window: window::Id,
         pane: pane_grid::Pane,
@@ -60,6 +63,7 @@ pub struct Dashboard {
     pub focus: Option<(window::Id, pane_grid::Pane)>,
     pub popout: HashMap<window::Id, (pane_grid::State<pane::State>, WindowSpec)>,
     pub streams: UniqueStreams,
+    favorites: Vec<(Exchange, Ticker)>,
 }
 
 impl Default for Dashboard {
@@ -69,6 +73,7 @@ impl Default for Dashboard {
             focus: None,
             streams: UniqueStreams::default(),
             popout: HashMap::new(),
+            favorites: Vec::new(),
         }
     }
 }
@@ -83,6 +88,7 @@ pub enum Event {
         stream: StreamKind,
     },
 }
+
 
 impl Dashboard {
     fn default_pane_config() -> Configuration<pane::State> {
@@ -112,6 +118,7 @@ impl Dashboard {
     pub fn from_config(
         panes: Configuration<pane::State>,
         popout_windows: Vec<(Configuration<pane::State>, WindowSpec)>,
+        favorites: Vec<(Exchange, Ticker)>,
     ) -> Self {
         let panes = pane_grid::State::with_configuration(panes);
 
@@ -129,6 +136,7 @@ impl Dashboard {
             focus: None,
             streams: UniqueStreams::default(),
             popout,
+            favorites,
         }
     }
 
@@ -168,6 +176,84 @@ impl Dashboard {
         ]))
     }
 
+    pub fn keyboard_subscription() -> Subscription<Message> {
+        // Only emit messages we care about (e.g., "/"); other keys are handled by components
+        iced::event::listen_with(|event, _status, _window| match event {
+            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                let is_toggle = matches!(&key,
+                    iced::keyboard::Key::Character(c)
+                        if c.as_str() == "/"
+                            && !modifiers.command()
+                            && !modifiers.shift()
+                            && !modifiers.alt()
+                            && !modifiers.control()
+                );
+
+                let is_nav = matches!(
+                    key,
+                    iced::keyboard::Key::Named(
+                        iced::keyboard::key::Named::ArrowUp
+                            | iced::keyboard::key::Named::ArrowDown
+                            | iced::keyboard::key::Named::Enter
+                            | iced::keyboard::key::Named::Backspace
+                            | iced::keyboard::key::Named::Escape
+                    )
+                );
+
+                if is_toggle || is_nav {
+                    Some(Message::KeyPressed(key.clone(), modifiers))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+    }
+
+    pub fn tables_subscription(&self, main_window: window::Id) -> Subscription<Message> {
+        // Wire subscriptions for all open ticker browsers so their keyboard/timer work
+        let mut subs: Vec<Subscription<Message>> = vec![];
+
+        // Main window panes
+        for (pane_id, state) in self.panes.iter() {
+            if state.ticker_browser.is_some() {
+                let p = *pane_id;
+                subs.push(
+                    tickers_table::TickersTable::open_subscription()
+                        .map(move |m| Message::Pane(main_window, pane::Message::TickerBrowser(p, m))),
+                );
+            }
+        }
+
+        // Popout panes
+        for (window_id, (panes, _spec)) in &self.popout {
+            for (pane_id, state) in panes.iter() {
+                if state.ticker_browser.is_some() {
+                    let w = *window_id;
+                    let p = *pane_id;
+                    subs.push(
+                        tickers_table::TickersTable::open_subscription()
+                            .map(move |m| Message::Pane(w, pane::Message::TickerBrowser(p, m))),
+                    );
+                }
+            }
+        }
+
+        if subs.is_empty() {
+            Subscription::none()
+        } else {
+            Subscription::batch(subs)
+        }
+    }
+
+    pub fn set_favorites(&mut self, favs: Vec<(Exchange, Ticker)>) {
+        self.favorites = favs;
+    }
+
+    pub fn favorited_tickers(&self) -> Vec<(Exchange, Ticker)> {
+        self.favorites.clone()
+    }
+
     pub fn update(
         &mut self,
         message: Message,
@@ -175,6 +261,84 @@ impl Dashboard {
         layout_id: &uuid::Uuid,
     ) -> (Task<Message>, Option<Event>) {
         match message {
+            Message::KeyPressed(key, modifiers) => {
+                // Currently only handling "/" (without modifiers) to toggle the ticker browser on focused pane
+                if let iced::keyboard::Key::Character(c) = &key {
+                    if c.as_str() == "/"
+                        && !modifiers.command()
+                        && !modifiers.shift()
+                        && !modifiers.alt()
+                        && !modifiers.control()
+                    {
+                        if let Some((window, pane)) = self.focus {
+                            let should_close = self
+                                .get_pane(main_window.id, window, pane)
+                                .map(|ps| ps.modal == Some(pane::Modal::TickerBrowser))
+                                .unwrap_or(false);
+
+                            let msg = if should_close {
+                                pane::Message::ToggleModal(pane, pane::Modal::TickerBrowser)
+                            } else {
+                                pane::Message::OpenTickerBrowser(pane)
+                            };
+
+                            // Focus search when opening
+                            if !should_close {
+                                let focus_task = iced::widget::text_input::focus("ticker_search")
+                                    .map(|_m: tickers_table::Message| Message::RefreshStreams);
+                                return (
+                                    Task::done(Message::Pane(window, msg)).chain(focus_task),
+                                    None,
+                                );
+                            }
+
+                            return (Task::done(Message::Pane(window, msg)), None);
+                        }
+                    }
+                }
+
+                // Forward navigation keys to the open ticker browser in the focused pane
+                let is_nav_key = matches!(
+                    key,
+                    iced::keyboard::Key::Named(
+                        iced::keyboard::key::Named::ArrowUp
+                            | iced::keyboard::key::Named::ArrowDown
+                            | iced::keyboard::key::Named::Enter
+                            | iced::keyboard::key::Named::Backspace
+                            | iced::keyboard::key::Named::Escape
+                    )
+                );
+
+                if is_nav_key {
+                    if let Some((window, pane)) = self.focus {
+                        if let Some(pane_state) = self.get_mut_pane(main_window.id, window, pane) {
+                            if let Some(table) = pane_state.ticker_browser.as_mut() {
+                                match table.update(tickers_table::Message::KeyboardNavigate(key, modifiers)) {
+                                    Some(tickers_table::Action::TickerSelected(ti, ex, content)) => {
+                                        // Close browser and init pane with the selected chart
+                                        pane_state.ticker_browser = None;
+                                        pane_state.modal = None;
+                                        let task = self.init_pane_task(main_window.id, ti, ex, &content);
+                                        return (task, None);
+                                    }
+                                    Some(tickers_table::Action::Fetch(task)) => {
+                                        let target_window = window;
+                                        let target_pane = pane;
+                                        return (
+                                            task.map(move |m| Message::Pane(target_window, pane::Message::TickerBrowser(target_pane, m))),
+                                            None,
+                                        );
+                                    }
+                                    Some(tickers_table::Action::ErrorOccurred(err)) => {
+                                        return (Task::done(Message::Notification(Toast::error(err.to_string()))), None);
+                                    }
+                                    None => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             Message::SavePopoutSpecs(specs) => {
                 for (window_id, new_spec) in specs {
                     if let Some((_, spec)) = self.popout.get_mut(&window_id) {
@@ -197,6 +361,58 @@ impl Dashboard {
             },
             Message::Pane(window, message) => {
                 match message {
+                    pane::Message::TickerBrowser(pane, msg) => {
+                        if let Some(pane_state) = self.get_mut_pane(main_window.id, window, pane) {
+                            if let Some(table) = pane_state.ticker_browser.as_mut() {
+                                match table.update(msg) {
+                                    Some(tickers_table::Action::TickerSelected(ti, ex, content)) => {
+                                        // Close the browser but keep StreamModifier open
+                                        pane_state.ticker_browser = None;
+                                        pane_state.modal = None;
+                                        let task = self.init_pane_task(main_window.id, ti, ex, &content);
+                                        return (task, None);
+                                    }
+                                    Some(tickers_table::Action::Fetch(task)) => {
+                                        let target_pane = pane;
+                                        return (
+                                            task.map(move |m| Message::Pane(window, pane::Message::TickerBrowser(target_pane, m))),
+                                            None,
+                                        );
+                                    }
+                                    Some(tickers_table::Action::ErrorOccurred(err)) => {
+                                        return (Task::done(Message::Notification(Toast::error(err.to_string()))), None);
+                                    }
+                                    None => {}
+                                }
+                                // Sync shared favorites from this table and broadcast to other open tables
+                                let new_favs = table.favorited_tickers();
+                                if new_favs != self.favorites {
+                                    self.favorites = new_favs.clone();
+
+                                    // Update any other open ticker browsers to reflect latest favorites
+                                    // Main window panes
+                                    for (p_id, p_state) in self.panes.iter_mut() {
+                                        if *p_id != pane {
+                                            if let Some(other_table) = p_state.ticker_browser.as_mut() {
+                                                other_table.set_favorites(&new_favs);
+                                            }
+                                        }
+                                    }
+
+                                    // Popout panes
+                                    for (_w_id, (panes, _)) in self.popout.iter_mut() {
+                                        for (p_id, p_state) in panes.iter_mut() {
+                                            if *p_id != pane {
+                                                if let Some(other_table) = p_state.ticker_browser.as_mut() {
+                                                    other_table.set_favorites(&new_favs);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     pane::Message::PaneClicked(pane) => {
                         self.focus = Some((window, pane));
                     }
@@ -252,6 +468,33 @@ impl Dashboard {
                         }
 
                         return (Task::done(Message::RefreshStreams), None);
+                    }
+                    pane::Message::OpenTickerBrowser(pane) => {
+                        let favs = self.favorites.clone();
+                        if let Some(state) = self.get_mut_pane(main_window.id, window, pane) {
+                            if state.ticker_browser.is_none() {
+                                let (table, task) = tickers_table::TickersTable::new(favs);
+                                state.ticker_browser = Some(table);
+                                let target_pane = pane;
+                                if let Some(ps) = self.get_mut_pane(main_window.id, window, pane) {
+                                    ps.modal = Some(pane::Modal::TickerBrowser);
+                                }
+                                let focus_task = iced::widget::text_input::focus("ticker_search")
+                                    .map(|_m: tickers_table::Message| Message::RefreshStreams);
+                                return (
+                                    task.map(move |m| Message::Pane(window, pane::Message::TickerBrowser(target_pane, m)))
+                                        .chain(focus_task),
+                                    None,
+                                );
+                            } else {
+                                if let Some(ps) = self.get_mut_pane(main_window.id, window, pane) {
+                                    ps.modal = Some(pane::Modal::TickerBrowser);
+                                }
+                                let focus_task = iced::widget::text_input::focus("ticker_search")
+                                    .map(|_m: tickers_table::Message| Message::RefreshStreams);
+                                return (focus_task, None);
+                            }
+                        }
                     }
                     pane::Message::ToggleModal(pane, modal_type) => {
                         if let Some(pane) = self.get_mut_pane(main_window.id, window, pane) {
@@ -828,7 +1071,7 @@ impl Dashboard {
         main_window: &'a Window,
         timezone: UserTimezone,
     ) -> Element<'a, Message> {
-        let pane_grid: Element<_> = PaneGrid::new(&self.panes, |id, pane, maximized| {
+        let base_grid: Element<_> = PaneGrid::new(&self.panes, |id, pane, maximized| {
             let is_focused = self.focus == Some((main_window.id, id));
             pane.view(
                 id,
@@ -848,7 +1091,114 @@ impl Dashboard {
         .style(style::pane_grid)
         .into();
 
-        pane_grid.map(move |message| Message::Pane(main_window.id, message))
+        // Map base to Dashboard messages
+        let mut element: Element<_> = base_grid.map(move |message| Message::Pane(main_window.id, message));
+
+        // Prefer the focused pane (on the main window) if it has the TickerBrowser open;
+        // fallback to the first pane that has it.
+        let focused_candidate = if let Some((w, pid)) = self.focus {
+            if w == main_window.id {
+                self.panes.get(pid).and_then(|state| {
+                    (state.modal == Some(pane::Modal::TickerBrowser))
+                        .then(|| state.ticker_browser.as_ref().map(|t| (pid, t)))
+                        .flatten()
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // If any pane is maximized, let the pane-level overlay handle TickerBrowser; skip dashboard overlay
+        let any_maximized = self.panes.maximized().is_some();
+
+        if !any_maximized && let Some((pane_id, table)) = focused_candidate.or_else(|| {
+            self
+                .panes
+                .iter()
+                .find_map(|(pid, state)| {
+                    if state.modal == Some(pane::Modal::TickerBrowser) {
+                        state.ticker_browser.as_ref().map(|t| (*pid, t))
+                    } else {
+                        None
+                    }
+                })
+        })
+        {
+            // Capture layout and constants for positioning below the ticker button within the pane title bar
+            let layout = self.panes.layout().clone();
+            let spacing: f32 = 6.0;
+            let min_size: f32 = 200.0;
+            let titlebar_height: f32 = 32.0;
+            let titlebar_left_inset: f32 = 8.0;
+
+            let close_msg = Message::Pane(
+                main_window.id,
+                pane::Message::ToggleModal(pane_id, pane::Modal::TickerBrowser),
+            );
+
+            element = iced::widget::stack![
+                element,
+                responsive(move |size| {
+                    let regions = layout.pane_regions(spacing, min_size, size);
+                    let rect = regions
+                        .get(&pane_id)
+                        .copied()
+                        .unwrap_or(Rectangle { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
+
+                    let is_bottom_half = rect.y + titlebar_height > (size.height * 0.5);
+                    let mut left_pad = rect.x + titlebar_left_inset;
+                    // If the ticker button area is on the right half, nudge overlay a bit to the left
+                    if left_pad > size.width * 0.5 {
+                        left_pad = (left_pad - 120.0).max(12.0);
+                    }
+                    // Clamp to keep overlay fully visible horizontally
+                    let overlay_w = 360.0_f32;
+                    let right_margin = 12.0_f32;
+                    if left_pad + overlay_w > size.width - right_margin {
+                        left_pad = (size.width - right_margin - overlay_w).max(12.0);
+                    }
+
+                    let content = container(
+                        table
+                            .view(size)
+                            .map(move |m| Message::Pane(main_window.id, pane::Message::TickerBrowser(pane_id, m))),
+                    )
+                    .width(Length::Fixed(360.0))
+                    .height(Length::Shrink);
+
+                    if is_bottom_half {
+                        // Render above the pane: bottom-align overlay so its bottom sits at rect.y
+                        let bottom_pad = size.height - rect.y;
+                        mouse_area(
+                            container(opaque(content))
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .padding(padding::left(left_pad).bottom(bottom_pad))
+                                .align_x(Alignment::Start)
+                                .align_y(Alignment::End),
+                        )
+                        .on_press(close_msg.clone())
+                        .into()
+                    } else {
+                        // Render below the title bar
+                        mouse_area(
+                            container(opaque(content))
+                                .width(Length::Fill)
+                                .height(Length::Fill)
+                                .padding(padding::left(left_pad).top(rect.y + titlebar_height))
+                                .align_x(Alignment::Start),
+                        )
+                        .on_press(close_msg.clone())
+                        .into()
+                    }
+                })
+            ]
+            .into();
+        }
+
+        element
     }
 
     pub fn view_window<'a>(
@@ -858,26 +1208,28 @@ impl Dashboard {
         timezone: UserTimezone,
     ) -> Element<'a, Message> {
         if let Some((state, _)) = self.popout.get(&window) {
-            let content = container(
-                PaneGrid::new(state, |id, pane, _maximized| {
-                    let is_focused = self.focus == Some((window, id));
-                    pane.view(
-                        id,
-                        state.len(),
-                        is_focused,
-                        false,
-                        window,
-                        main_window,
-                        timezone,
-                    )
-                })
-                .on_click(pane::Message::PaneClicked),
-            )
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .padding(8);
+            let pane_grid: Element<_> = PaneGrid::new(state, |id, pane, _maximized| {
+                let is_focused = self.focus == Some((window, id));
+                pane.view(
+                    id,
+                    state.len(),
+                    is_focused,
+                    false,
+                    window,
+                    main_window,
+                    timezone,
+                )
+            })
+            .on_click(pane::Message::PaneClicked)
+            .into();
 
-            Element::new(content).map(move |message| Message::Pane(window, message))
+            let base = container(pane_grid)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .padding(8);
+
+            // Let pane-level view handle any overlays (e.g., TickerBrowser) to avoid duplication
+            Element::new(base).map(move |message| Message::Pane(window, message))
         } else {
             Element::new(center("No pane found for window"))
                 .map(move |message| Message::Pane(window, message))
