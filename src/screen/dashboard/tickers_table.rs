@@ -24,6 +24,15 @@ const INACTIVE_UPDATE_INTERVAL: u64 = 300;
 const BROWSER_WIDTH: f32 = 412.0;
 const TICKER_CARD_HEIGHT: f32 = 33.6; // ~20% taller than 28.0
 const SEARCH_BAR_HEIGHT: f32 = 72.0;
+// Spacing and header constants for accurate visibility math
+const CARD_SPACING: f32 = 4.0;
+const EXCHANGE_FILTERS_ROW_HEIGHT: f32 = 32.0;
+const SORT_BUTTON_ROW_HEIGHT: f32 = 32.0;
+const MARKET_BUTTON_ROW_HEIGHT: f32 = 28.0;
+const SORT_COLUMN_SPACING: f32 = 4.0; // internal spacing inside sort column
+const COLUMN_SPACING_WITH_SORT: f32 = 8.0; // spacing between sections when sort is shown
+const COLUMN_SPACING_NO_SORT: f32 = 4.0; // spacing between sections when sort is hidden
+const HRULE_THICKNESS: f32 = 1.0;
 
 // Enhanced virtualization constants
 // Note: Using fixed buffer calculations instead of these constants for better stability
@@ -615,7 +624,36 @@ impl TickersTable {
 
 
     fn is_container_visible(&self, index: usize, bounds: Size) -> bool {
-        let item_top = SEARCH_BAR_HEIGHT + (index as f32 * TICKER_CARD_HEIGHT);
+        // Compute a conservative header height (everything above the ticker list)
+        let mut header_height = SEARCH_BAR_HEIGHT;
+        let section_spacing = if self.show_sort_options {
+            COLUMN_SPACING_WITH_SORT
+        } else {
+            COLUMN_SPACING_NO_SORT
+        };
+        // spacing between search bar and next section
+        header_height += section_spacing;
+        if self.show_sort_options {
+            // First row: sort buttons
+            header_height += SORT_BUTTON_ROW_HEIGHT;
+            // Optional market filter row for All/Bybit/Binance
+            let show_market_filters = matches!(
+                self.selected_tab,
+                TickerTab::All | TickerTab::Bybit | TickerTab::Binance
+            );
+            if show_market_filters {
+                header_height += MARKET_BUTTON_ROW_HEIGHT + SORT_COLUMN_SPACING;
+            }
+            // Horizontal rule and internal spacing
+            header_height += HRULE_THICKNESS + SORT_COLUMN_SPACING;
+            // spacing between sort section and exchange filter row
+            header_height += section_spacing;
+        }
+        // Exchange filters row (ALL/Bybit/Binance/HL/Favorites)
+        header_height += EXCHANGE_FILTERS_ROW_HEIGHT;
+
+        // Position of this item (include per-item spacing)
+        let item_top = header_height + (index as f32) * (TICKER_CARD_HEIGHT + CARD_SPACING);
         let item_bottom = item_top + TICKER_CARD_HEIGHT;
 
         // Generous visibility calculation with large buffer to prevent disappearing cards
@@ -913,15 +951,15 @@ impl TickersTable {
             let show_linear = matches!(self.selected_tab, TickerTab::All | TickerTab::Bybit | TickerTab::Binance);
             let show_inverse = matches!(self.selected_tab, TickerTab::All | TickerTab::Bybit | TickerTab::Binance);
             
-            let spot_market_button = button(text("Spot"))
+            let spot_market_button = button(text("Spot").align_x(Horizontal::Center))
                 .on_press(Message::SetMarketFilter(Some(MarketKind::Spot)))
                 .style(|theme, status| style::button::transparent(theme, status, false));
 
-            let linear_markets_btn = button(text("Linear"))
+            let linear_markets_btn = button(text("Linear").align_x(Horizontal::Center))
                 .on_press(Message::SetMarketFilter(Some(MarketKind::LinearPerps)))
                 .style(|theme, status| style::button::transparent(theme, status, false));
 
-            let inverse_markets_btn = button(text("Inverse"))
+            let inverse_markets_btn = button(text("Inverse").align_x(Horizontal::Center))
                 .on_press(Message::SetMarketFilter(Some(MarketKind::InversePerps)))
                 .style(|theme, status| style::button::transparent(theme, status, false));
 
@@ -1309,29 +1347,33 @@ fn create_expanded_ticker_card(
 ) -> Element<'static, Message> {
     let (ticker_str, market) = ticker.display_symbol_and_type();
 
-    // Pre-compute color for daily change text (optimized version)
+    // Pre-compute color for daily change text (using same scheme as display_ticker)
     let change_style = move |theme: &Theme| {
+        // Contrast-safe color: blend from the theme's base text color toward success/danger
+        // based on daily change magnitude. This ensures readability on light/dark themes.
         let palette = theme.extended_palette();
         let magnitude = display_data.card_color_alpha.abs().clamp(0.0, 1.0);
-        let threshold = 0.2;
-        
-        let color = if magnitude <= threshold {
-            // Neutral case: use theme text color
-            palette.background.base.text
+        let threshold = 0.15; // ignore tiny moves
+
+        let base = palette.background.base.text; // guaranteed high-contrast text color
+        let target = if display_data.card_color_alpha >= 0.0 {
+            palette.success.strong.color
         } else {
-            let t = ((magnitude - threshold) / (1.0 - threshold)).clamp(0.0, 1.0);
-            let strong = if display_data.card_color_alpha >= 0.0 {
-                palette.success.strong.color
-            } else {
-                palette.danger.strong.color
-            };
-            // Optimized lerp
-            iced::Color {
-                r: 1.0 + (strong.r - 1.0) * t,
-                g: 1.0 + (strong.g - 1.0) * t,
-                b: 1.0 + (strong.b - 1.0) * t,
-                a: 1.0 + (strong.a - 1.0) * t,
-            }
+            palette.danger.strong.color
+        };
+
+        let t = if magnitude <= threshold {
+            0.0
+        } else {
+            ((magnitude - threshold) / (1.0 - threshold)).clamp(0.0, 1.0)
+        };
+
+        // Lerp from base text color -> target accent
+        let color = iced::Color {
+            r: base.r + (target.r - base.r) * t,
+            g: base.g + (target.g - base.g) * t,
+            b: base.b + (target.b - base.b) * t,
+            a: base.a + (target.a - base.a) * t,
         };
         
         let mut s = iced::widget::text::Style::default();
