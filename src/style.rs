@@ -111,7 +111,7 @@ pub fn title_text(theme: &Theme) -> iced::widget::text::Style {
     let palette = theme.extended_palette();
 
     iced::widget::text::Style {
-        color: Some(palette.background.weakest.color),
+        color: Some(palette.background.base.text.scale_alpha(0.5)),
     }
 }
 

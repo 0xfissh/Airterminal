@@ -1439,7 +1439,7 @@ impl Airterminal {
         }
         
         let dashboard = self.active_dashboard();
-        let sidebar_pos = self.sidebar.position();
+        let sidebar_pos = sidebar::Position::Right;
 
         let content = if id == self.main_window.id {
             let sidebar_view = self
@@ -1451,36 +1451,31 @@ impl Airterminal {
                 .view(&self.main_window, self.timezone)
                 .map(move |msg| Message::Dashboard(None, msg));
 
-            let header_title = {
-                #[cfg(target_os = "macos")]
-                {
-                    iced::widget::center(
-                        text("AIRTERMINAL")
-                            .font(iced::Font {
-                                weight: iced::font::Weight::Bold,
-                                ..Default::default()
-                            })
-                            .size(16)
-                            .style(style::title_text),
-                    )
-                    .height(20)
-                    .align_y(Alignment::Center)
-                    .padding(padding::top(4))
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    column![]
-                }
-            };
+            // Header with centered app name and controls at the top-right
+            let header_base = row![
+                iced::widget::Space::with_width(iced::Length::Fill),
+                text("AIRTERMINAL")
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..Default::default()
+                    })
+                    .size(16)
+                    .style(style::title_text),
+                iced::widget::Space::with_width(iced::Length::Fill),
+            ]
+            .align_y(Alignment::Center)
+            .padding(padding::top(4).left(8).right(8));
+
+            let header = iced::widget::stack![
+                header_base,
+                iced::widget::container(sidebar_view)
+                    .width(iced::Length::Fill)
+                    .align_x(Alignment::End),
+            ];
 
             let base = column![
-                header_title,
-                match sidebar_pos {
-                    sidebar::Position::Left => row![sidebar_view, dashboard_view,],
-                    sidebar::Position::Right => row![dashboard_view, sidebar_view],
-                }
-                .spacing(4)
-                .padding(8),
+                header,
+                container(dashboard_view).padding(8),
             ];
 
             if let Some(menu) = self.sidebar.active_menu() {
@@ -1568,7 +1563,6 @@ impl Airterminal {
         dashboard: &'a Dashboard,
         menu: sidebar::Menu,
     ) -> Element<'a, Message> {
-        let sidebar_pos = self.sidebar.position();
 
         match menu {
             sidebar::Menu::Settings => {
@@ -1602,15 +1596,7 @@ impl Airterminal {
                         Some(self.timezone),
                         Message::SetTimezone,
                     );
-
-                    let sidebar_pos = pick_list(
-                        [sidebar::Position::Left, sidebar::Position::Right],
-                        Some(sidebar_pos),
-                        |pos| {
-                            Message::Sidebar(dashboard::sidebar::Message::SetSidebarPosition(pos))
-                        },
-                    );
-
+                    
                     let scale_factor = {
                         let current_value: f64 = self.scale_factor.into();
 
@@ -1678,7 +1664,6 @@ impl Airterminal {
                     container(
                         column![
                             column![open_data_folder,].spacing(8),
-                            column![text("Sidebar position").size(14), sidebar_pos,].spacing(8),
                             column![text("Time zone").size(14), timezone_picklist,].spacing(8),
                             column![text("Theme").size(14), theme_picklist,].spacing(8),
                             column![text("Interface scale").size(14), scale_factor,].spacing(8),
@@ -1697,17 +1682,15 @@ impl Airterminal {
                     .style(style::dashboard_modal)
                 };
 
-                let (align_x, padding) = match sidebar_pos {
-                    sidebar::Position::Left => (Alignment::Start, padding::left(44).bottom(4)),
-                    sidebar::Position::Right => (Alignment::End, padding::right(44).bottom(4)),
-                };
+                // Anchor settings modal to top-right, with extra top padding for picklists
+                let (align_x, padding) = (Alignment::End, padding::right(44).top(76));
 
                 let base_content = dashboard_modal(
                     base,
                     settings_modal,
                     Message::Sidebar(dashboard::sidebar::Message::ToggleSidebarMenu(None)),
                     padding,
-                    Alignment::End,
+                    Alignment::Start,
                     align_x,
                 );
 
@@ -1807,10 +1790,7 @@ impl Airterminal {
                     .style(style::dashboard_modal)
                 };
 
-                let (align_x, padding) = match sidebar_pos {
-                    sidebar::Position::Left => (Alignment::Start, padding::left(44).top(40)),
-                    sidebar::Position::Right => (Alignment::End, padding::right(44).top(40)),
-                };
+                let (align_x, padding) = (Alignment::End, padding::right(44).top(40));
 
                 dashboard_modal(
                     base,
@@ -1822,10 +1802,7 @@ impl Airterminal {
                 )
             }
             sidebar::Menu::Audio => {
-                let (align_x, padding) = match sidebar_pos {
-                    sidebar::Position::Left => (Alignment::Start, padding::left(44).top(76)),
-                    sidebar::Position::Right => (Alignment::End, padding::right(44).top(76)),
-                };
+                let (align_x, padding) = (Alignment::End, padding::right(44).top(76));
 
                 let depth_streams_list = dashboard.streams.depth_streams(None);
 
@@ -1841,10 +1818,8 @@ impl Airterminal {
                 )
             }
             sidebar::Menu::ThemeEditor => {
-                let (align_x, padding) = match sidebar_pos {
-                    sidebar::Position::Left => (Alignment::Start, padding::left(44).bottom(4)),
-                    sidebar::Position::Right => (Alignment::End, padding::right(44).bottom(4)),
-                };
+                // Anchor theme editor modal to top-right
+                let (align_x, padding) = (Alignment::End, padding::right(44).top(40));
 
                 dashboard_modal(
                     base,
@@ -1853,22 +1828,20 @@ impl Airterminal {
                         .map(Message::ThemeEditor),
                     Message::Sidebar(dashboard::sidebar::Message::ToggleSidebarMenu(None)),
                     padding,
-                    Alignment::End,
+                    Alignment::Start,
                     align_x,
                 )
             }
             sidebar::Menu::Account => {
-                let (align_x, padding) = match sidebar_pos {
-                    sidebar::Position::Left => (Alignment::Start, padding::left(44).bottom(4)),
-                    sidebar::Position::Right => (Alignment::End, padding::right(44).bottom(4)),
-                };
+                // Anchor account modal to top-right
+                let (align_x, padding) = (Alignment::End, padding::right(44).top(40));
 
                 dashboard_modal(
                     base,
                     self.view_account_modal(),
                     Message::Sidebar(dashboard::sidebar::Message::ToggleSidebarMenu(None)),
                     padding,
-                    Alignment::End,
+                    Alignment::Start,
                     align_x,
                 )
             }

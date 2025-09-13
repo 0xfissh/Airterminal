@@ -7,14 +7,13 @@ use crate::{
 use data::sidebar;
 
 use iced::{
-    Alignment, Element, Length, Subscription, Task,
-    widget::{Space, column, row},
+    Alignment, Element, Subscription, Task,
+    widget::{row},
 };
 
 #[derive(Debug, Clone)]
 pub enum Message {
     ToggleSidebarMenu(Option<sidebar::Menu>),
-    SetSidebarPosition(sidebar::Position),
 }
 
 pub struct Sidebar {
@@ -37,25 +36,18 @@ impl Sidebar {
             Message::ToggleSidebarMenu(menu) => {
                 self.set_menu(menu.filter(|&m| !self.is_menu_active(m)));
             }
-            Message::SetSidebarPosition(position) => {
-                self.state.position = position;
-            }
         }
 
         Task::none()
     }
 
     pub fn view(&self, audio_volume: Option<f32>) -> Element<'_, Message> {
-        let state = &self.state;
-
-        let tooltip_position = if state.position == sidebar::Position::Left {
-            TooltipPosition::Right
-        } else {
-            TooltipPosition::Left
-        };
+        // When used in the top header, tooltips should open downward from the top-right cluster
+        let tooltip_position = TooltipPosition::Bottom;
 
         let nav_buttons = self.nav_buttons(audio_volume, tooltip_position);
 
+        // Render as a horizontal row for top-right header placement
         row![nav_buttons]
             .spacing(4)
             .into()
@@ -69,7 +61,7 @@ impl Sidebar {
         &self,
         audio_volume: Option<f32>,
         tooltip_position: TooltipPosition,
-    ) -> iced::widget::Column<'_, Message> {
+    ) -> iced::widget::Row<'_, Message> {
         let settings_modal_button = {
             let is_active = self.is_menu_active(sidebar::Menu::Settings)
                 || self.is_menu_active(sidebar::Menu::ThemeEditor);
@@ -131,14 +123,13 @@ impl Sidebar {
             )
         };
 
-        column![
+        row![
+            // Keep order: layout, audio, account, settings
             layout_modal_button,
             audio_btn,
-            Space::with_height(Length::Fill),
             account_button,
             settings_modal_button,
         ]
-        .width(32)
         .spacing(8)
     }
 
@@ -150,9 +141,7 @@ impl Sidebar {
         self.state.active_menu
     }
 
-    pub fn position(&self) -> sidebar::Position {
-        self.state.position
-    }
+    // Sidebar position is fixed to top-right in the main view; accessor removed
 
     pub fn set_menu(&mut self, menu: Option<sidebar::Menu>) {
         self.state.active_menu = menu;
