@@ -315,6 +315,10 @@ impl Dashboard {
                             if let Some(table) = pane_state.ticker_browser.as_mut() {
                                 match table.update(tickers_table::Message::KeyboardNavigate(key, modifiers)) {
                                     Some(tickers_table::Action::TickerSelected(ti, ex, content)) => {
+                                        // Unlink if selecting a different ticker
+                                        if pane_state.settings.ticker_info != Some(ti) {
+                                            pane_state.link_group = None;
+                                        }
                                         // Close browser and init pane with the selected chart
                                         pane_state.ticker_browser = None;
                                         pane_state.modal = None;
@@ -361,17 +365,104 @@ impl Dashboard {
             },
             Message::Pane(window, message) => {
                 match message {
+                    pane::Message::SwitchLinkGroup(pane, group) => {
+                        // If group is None, unlink this pane. If Some, toggle/cycle selection via modal elsewhere.
+                        if let Some(state) = self.get_mut_pane(main_window.id, window, pane) {
+                            if group.is_none() {
+                                state.link_group = None;
+                                return (Task::none(), None);
+                            }
+                        }
+
+                        // Find a ticker_info from any other pane that shares the group
+                        let maybe_group = group;
+                        let maybe_ticker_info = self
+                            .iter_all_panes(main_window.id)
+                            .filter(|(w, p, _)| !(*w == window && *p == pane))
+                            .find_map(|(_, _, other_state)| {
+                                if other_state.link_group == maybe_group {
+                                    other_state.settings.ticker_info
+                                } else {
+                                    None
+                                }
+                            });
+
+                        if let Some(state) = self.get_mut_pane(main_window.id, window, pane) {
+                            state.link_group = maybe_group;
+                            state.modal = None;
+
+                            if let Some(ticker_info) = maybe_ticker_info
+                                && state.settings.ticker_info != Some(ticker_info)
+                            {
+                                let content = state.identifier_str();
+
+                                // Prepare streams for this content
+                                let streams = match content.as_str() {
+                                    "heatmap" | "time&sales" => {
+                                        vec![StreamKind::DepthAndTrades { ticker: ticker_info.ticker }]
+                                    }
+                                    "footprint" => {
+                                        match state.settings.selected_basis.unwrap_or(Basis::Time(Timeframe::M5.into())) {
+                                            Basis::Time(interval) => vec![
+                                                StreamKind::DepthAndTrades { ticker: ticker_info.ticker },
+                                                StreamKind::Kline { ticker: ticker_info.ticker, timeframe: interval.into() },
+                                            ],
+                                            Basis::Tick(_) => vec![StreamKind::DepthAndTrades { ticker: ticker_info.ticker }],
+                                        }
+                                    }
+                                    "candlestick" => {
+                                        match state.settings.selected_basis.unwrap_or(Basis::Time(Timeframe::M15.into())) {
+                                            Basis::Time(interval) => vec![StreamKind::Kline { ticker: ticker_info.ticker, timeframe: interval.into() }],
+                                            Basis::Tick(_) => vec![StreamKind::DepthAndTrades { ticker: ticker_info.ticker }],
+                                        }
+                                    }
+                                    _ => vec![],
+                                };
+
+                                state.streams = streams.clone();
+                                if let Err(err) = state.set_content(ticker_info, &content) {
+                                    return (
+                                        Task::done(Message::ErrorOccurred(Some(state.unique_id()), err)),
+                                        None,
+                                    );
+                                }
+
+                                // If any kline streams, fetch immediately
+                                for stream in &streams {
+                                    if let StreamKind::Kline { .. } = stream {
+                                        let pane_id = state.unique_id();
+                                        return (
+                                            kline_fetch_task(*layout_id, pane_id, *stream, None, None),
+                                            None,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
+                        return (Task::done(Message::RefreshStreams), None);
+                    }
                     pane::Message::TickerBrowser(pane, msg) => {
                         if let Some(pane_state) = self.get_mut_pane(main_window.id, window, pane) {
                             if let Some(table) = pane_state.ticker_browser.as_mut() {
                                 match table.update(msg) {
                                     Some(tickers_table::Action::TickerSelected(ti, ex, content)) => {
-                                        // Close the browser but keep StreamModifier open
-                                        pane_state.ticker_browser = None;
-                                        pane_state.modal = None;
-                                        let task = self.init_pane_task(main_window.id, ti, ex, &content);
-                                        return (task, None);
+                                        if content == "link_group" {
+                                            let task = self.switch_tickers_in_group(main_window.id, *layout_id, ti);
+                                            return (task.chain(Task::done(Message::RefreshStreams)), None);
+                                        } else {
+                                            // Unlink if selecting a different ticker
+                                            if pane_state.settings.ticker_info != Some(ti) {
+                                                pane_state.link_group = None;
+                                            }
+                                            // Close the browser but keep StreamModifier open
+                                            pane_state.ticker_browser = None;
+                                            pane_state.modal = None;
+                                            let task = self.init_pane_task(main_window.id, ti, ex, &content);
+                                            return (task, None);
+                                        }
                                     }
+                                    // LinkToGroup removed: we will reuse TickerSelected with a sentinel below
                                     Some(tickers_table::Action::Fetch(task)) => {
                                         let target_pane = pane;
                                         return (
@@ -1351,6 +1442,96 @@ impl Dashboard {
         }
 
         Task::none()
+    }
+
+    pub fn switch_tickers_in_group(
+        &mut self,
+        main_window: window::Id,
+        layout_id: uuid::Uuid,
+        ticker_info: TickerInfo,
+    ) -> Task<Message> {
+        // Determine active group from focused pane
+        let link_group = self.focus.and_then(|(window, pane)| {
+            self.get_pane(main_window, window, pane)
+                .and_then(|state| state.link_group)
+        });
+
+        if let Some(group) = link_group {
+            let pane_infos: Vec<(window::Id, pane_grid::Pane, String)> = self
+                .iter_all_panes_mut(main_window)
+                .filter_map(|(window, pane, state)| {
+                    if state.link_group == Some(group) {
+                        Some((window, pane, state.identifier_str()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            let tasks: Vec<Task<Message>> = pane_infos
+                .iter()
+                .map(|(window, pane, content)| {
+                    if let Some(state) = self.get_mut_pane(main_window, *window, *pane) {
+                        // Build streams based on pane content kind and current basis
+                        let streams = match content.as_str() {
+                            "heatmap" | "time&sales" => {
+                                vec![StreamKind::DepthAndTrades { ticker: ticker_info.ticker }]
+                            }
+                            "footprint" => match state
+                                .settings
+                                .selected_basis
+                                .unwrap_or(Basis::Time(Timeframe::M5.into()))
+                            {
+                                Basis::Time(interval) => vec![
+                                    StreamKind::DepthAndTrades { ticker: ticker_info.ticker },
+                                    StreamKind::Kline { ticker: ticker_info.ticker, timeframe: interval.into() },
+                                ],
+                                Basis::Tick(_) => vec![StreamKind::DepthAndTrades { ticker: ticker_info.ticker }],
+                            },
+                            "candlestick" => match state
+                                .settings
+                                .selected_basis
+                                .unwrap_or(Basis::Time(Timeframe::M15.into()))
+                            {
+                                Basis::Time(interval) => vec![
+                                    StreamKind::Kline { ticker: ticker_info.ticker, timeframe: interval.into() }
+                                ],
+                                Basis::Tick(_) => vec![StreamKind::DepthAndTrades { ticker: ticker_info.ticker }],
+                            },
+                            _ => vec![],
+                        };
+
+                        state.streams = streams.clone();
+                        if let Err(err) = state.set_content(ticker_info, content) {
+                            return Task::done(Message::ErrorOccurred(Some(state.unique_id()), err));
+                        }
+
+                        for stream in &streams {
+                            if let StreamKind::Kline { .. } = stream {
+                                let pane_id = state.unique_id();
+                                return kline_fetch_task(layout_id, pane_id, *stream, None, None);
+                            }
+                        }
+                    }
+
+                    Task::none()
+                })
+                .collect();
+
+            return Task::batch(tasks);
+        }
+
+        // Fallback: no group, update focused pane only
+        if let Some((window, pane)) = self.focus {
+            if let Some(state) = self.get_mut_pane(main_window, window, pane) {
+                let content_kind = state.identifier_str();
+                return self.init_pane_task(main_window, ticker_info, ticker_info.exchange(), &content_kind);
+            }
+        }
+
+        Task::done(Message::Notification(Toast::warn(
+            "No link group or focused pane found".to_string(),
+        )))
     }
 
     pub fn toggle_trade_fetch(&mut self, is_enabled: bool, main_window: &Window) {

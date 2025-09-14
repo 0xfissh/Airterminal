@@ -77,7 +77,7 @@ impl From<&Dashboard> for data::Dashboard {
                 },
                 Node::Pane(pane) => panes
                     .get(pane)
-                    .map_or(data::Pane::Starter, data::Pane::from),
+                    .map_or(data::Pane::Starter { link_group: None }, data::Pane::from),
             }
         }
 
@@ -106,12 +106,13 @@ impl From<&pane::State> for data::Pane {
         let streams = pane.streams.clone();
 
         match &pane.content {
-            pane::Content::Starter => data::Pane::Starter,
+            pane::Content::Starter => data::Pane::Starter { link_group: pane.link_group },
             pane::Content::Heatmap(chart, indicators) => data::Pane::HeatmapChart {
                 layout: chart.chart_layout(),
                 stream_type: streams,
                 settings: pane.settings,
                 indicators: indicators.clone(),
+                link_group: pane.link_group,
             },
             pane::Content::Kline(chart, indicators) => data::Pane::KlineChart {
                 layout: chart.chart_layout(),
@@ -119,10 +120,12 @@ impl From<&pane::State> for data::Pane {
                 stream_type: streams,
                 settings: pane.settings,
                 indicators: indicators.clone(),
+                link_group: pane.link_group,
             },
             pane::Content::TimeAndSales(_) => data::Pane::TimeAndSales {
                 stream_type: streams,
                 settings: pane.settings,
+                link_group: pane.link_group,
             },
         }
     }
@@ -139,12 +142,17 @@ pub fn configuration(pane: data::Pane) -> Configuration<pane::State> {
             a: Box::new(configuration(*a)),
             b: Box::new(configuration(*b)),
         },
-        data::Pane::Starter => Configuration::Pane(pane::State::new()),
+        data::Pane::Starter { link_group } => {
+            let mut state = pane::State::new();
+            state.link_group = link_group;
+            Configuration::Pane(state)
+        }
         data::Pane::HeatmapChart {
             layout,
             stream_type,
             settings,
             indicators,
+            link_group,
         } => {
             if let Some(ticker_info) = settings.ticker_info {
                 // Use Hyperliquid-specific tick size calculation for Hyperliquid exchange
@@ -174,7 +182,7 @@ pub fn configuration(pane: data::Pane) -> Configuration<pane::State> {
                         .unwrap_or(Basis::default_time(Some(ticker_info)))
                 };
 
-                Configuration::Pane(pane::State::from_config(
+                let mut state = pane::State::from_config(
                     pane::Content::Heatmap(
                         HeatmapChart::new(
                             layout,
@@ -188,7 +196,9 @@ pub fn configuration(pane: data::Pane) -> Configuration<pane::State> {
                     ),
                     stream_type,
                     settings,
-                ))
+                );
+                state.link_group = link_group;
+                Configuration::Pane(state)
             } else {
                 log::info!("Skipping a HeatmapChart initialization due to missing ticker info");
                 Configuration::Pane(pane::State::new())
@@ -200,6 +210,7 @@ pub fn configuration(pane: data::Pane) -> Configuration<pane::State> {
             stream_type,
             settings,
             indicators,
+            link_group,
         } => match kind {
             data::chart::KlineChartKind::Footprint { .. } => {
                 if let Some(ticker_info) = settings.ticker_info {
@@ -211,7 +222,7 @@ pub fn configuration(pane: data::Pane) -> Configuration<pane::State> {
                         .selected_basis
                         .unwrap_or(Basis::Time(Timeframe::M5.into()));
 
-                    Configuration::Pane(pane::State::from_config(
+                    let mut state = pane::State::from_config(
                         pane::Content::Kline(
                             KlineChart::new(
                                 layout,
@@ -227,7 +238,9 @@ pub fn configuration(pane: data::Pane) -> Configuration<pane::State> {
                         ),
                         stream_type,
                         settings,
-                    ))
+                    );
+                    state.link_group = link_group;
+                    Configuration::Pane(state)
                 } else {
                     log::info!(
                         "Skipping a FootprintChart initialization due to missing ticker info"
@@ -246,7 +259,7 @@ pub fn configuration(pane: data::Pane) -> Configuration<pane::State> {
                         .unwrap_or(TickMultiplier(1))
                         .multiply_with_min_tick_size(ticker_info);
 
-                    Configuration::Pane(pane::State::from_config(
+                    let mut state = pane::State::from_config(
                         pane::Content::Kline(
                             KlineChart::new(
                                 layout,
@@ -262,7 +275,9 @@ pub fn configuration(pane: data::Pane) -> Configuration<pane::State> {
                         ),
                         stream_type,
                         settings,
-                    ))
+                    );
+                    state.link_group = link_group;
+                    Configuration::Pane(state)
                 } else {
                     log::info!(
                         "Skipping a CandlestickChart initialization due to missing ticker info"
@@ -274,6 +289,7 @@ pub fn configuration(pane: data::Pane) -> Configuration<pane::State> {
         data::Pane::TimeAndSales {
             stream_type,
             settings,
+            link_group,
         } => {
             if settings.ticker_info.is_none() {
                 log::info!("Skipping a TimeAndSales initialization due to missing ticker info");
@@ -281,12 +297,13 @@ pub fn configuration(pane: data::Pane) -> Configuration<pane::State> {
             }
 
             let config = settings.visual_config.and_then(|cfg| cfg.time_and_sales());
-
-            Configuration::Pane(pane::State::from_config(
+            let mut state = pane::State::from_config(
                 pane::Content::TimeAndSales(TimeAndSales::new(config, settings.ticker_info)),
                 stream_type,
                 settings,
-            ))
+            );
+            state.link_group = link_group;
+            Configuration::Pane(state)
         }
     }
 }
