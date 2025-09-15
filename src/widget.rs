@@ -214,8 +214,8 @@ where
             .align_x(Alignment::Start)
             .align_y(Alignment::Center)
     } else {
-        text("-")
-            .font(style::AZERET_MONO)
+        // Show link icon when unlinked
+        crate::style::icon_text(crate::style::Icon::Link, 12)
             .align_x(Alignment::Start)
             .align_y(Alignment::Center)
     };

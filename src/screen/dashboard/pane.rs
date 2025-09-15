@@ -951,13 +951,15 @@ impl Content {
                             for &group in row_groups {
                                 let is_selected = state.link_group == Some(group);
                                 let btn = if is_selected {
-                                    button(
+                                    button_with_tooltip(
                                         text(group.to_string())
                                             .font(style::AZERET_MONO)
                                             .align_x(iced::Alignment::Center),
+                                        Message::SwitchLinkGroup(pane, None),
+                                        Some("Unlink"),
+                                        tooltip::Position::Bottom,
+                                        |theme, status| style::button::transparent(theme, status, true),
                                     )
-                                    .style(|theme, status| style::button::transparent(theme, status, true))
-                                    .on_press(Message::SwitchLinkGroup(pane, None))
                                 } else {
                                     button(
                                         text(group.to_string())
@@ -966,6 +968,7 @@ impl Content {
                                     )
                                     .style(|theme, status| style::button::transparent(theme, status, false))
                                     .on_press(Message::SwitchLinkGroup(pane, Some(group)))
+                                    .into()
                                 };
 
                                 button_row = button_row.push(btn);
@@ -1034,13 +1037,15 @@ impl Content {
                             for &group in row_groups {
                                 let is_selected = state.link_group == Some(group);
                                 let btn = if is_selected {
-                                    button(
+                                    button_with_tooltip(
                                         text(group.to_string())
                                             .font(style::AZERET_MONO)
                                             .align_x(iced::Alignment::Center),
+                                        Message::SwitchLinkGroup(pane, None),
+                                        Some("Unlink"),
+                                        tooltip::Position::Bottom,
+                                        |theme, status| style::button::transparent(theme, status, true),
                                     )
-                                    .style(|theme, status| style::button::transparent(theme, status, true))
-                                    .on_press(Message::SwitchLinkGroup(pane, None))
                                 } else {
                                     button(
                                         text(group.to_string())
@@ -1049,6 +1054,7 @@ impl Content {
                                     )
                                     .style(|theme, status| style::button::transparent(theme, status, false))
                                     .on_press(Message::SwitchLinkGroup(pane, Some(group)))
+                                    .into()
                                 };
 
                                 button_row = button_row.push(btn);
@@ -1208,13 +1214,15 @@ where
                 for &group in row_groups {
                     let is_selected = state.link_group == Some(group);
                     let btn = if is_selected {
-                        button(
+                        button_with_tooltip(
                             text(group.to_string())
                                 .font(style::AZERET_MONO)
                                 .align_x(iced::Alignment::Center),
+                            Message::SwitchLinkGroup(pane, None),
+                            Some("Unlink"),
+                            tooltip::Position::Bottom,
+                            |theme, status| style::button::transparent(theme, status, true),
                         )
-                        .style(|theme, status| style::button::transparent(theme, status, true))
-                        .on_press(Message::SwitchLinkGroup(pane, None))
                     } else {
                         button(
                             text(group.to_string())
@@ -1223,6 +1231,7 @@ where
                         )
                         .style(|theme, status| style::button::transparent(theme, status, false))
                         .on_press(Message::SwitchLinkGroup(pane, Some(group)))
+                        .into()
                     };
 
                     button_row = button_row.push(btn);

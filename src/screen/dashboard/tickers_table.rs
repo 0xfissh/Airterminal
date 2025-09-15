@@ -1395,16 +1395,16 @@ fn create_expanded_ticker_card(
         } else { icon_text(Icon::Star, 12) })
             .on_press(Message::FavoriteTicker(exchange, *ticker))
             .style(|theme, status| style::button::transparent(theme, status, false)),
-        button(icon_text(Icon::Link, 12))
-            .on_press(Message::TickerSelected(*ticker, exchange, "link_group".to_string()))
-            .style(|theme, status| style::button::transparent(theme, status, false)),
-        Space::new(Length::Fixed(8.0), Length::Shrink),
         match exchange {
             Exchange::BybitInverse | Exchange::BybitLinear | Exchange::BybitSpot => icon_text(Icon::BybitLogo, 12),
             Exchange::BinanceInverse | Exchange::BinanceLinear | Exchange::BinanceSpot => icon_text(Icon::BinanceLogo, 12),
             Exchange::HyperliquidPerps => icon_text(Icon::HyperliquidLogo, 10),
         },
         text(format!("{} {}{}", ticker_str, market.to_string(), match market { MarketKind::Spot => "", MarketKind::LinearPerps | MarketKind::InversePerps => " Perp" })).size(14),
+        Space::new(Length::Fill, Length::Shrink),
+        button(icon_text(Icon::Link, 12))
+            .on_press(Message::TickerSelected(*ticker, exchange, "link_group".to_string()))
+            .style(|theme, status| style::button::transparent(theme, status, false)),
     ]
     .align_y(Alignment::Center)
     .spacing(6);
