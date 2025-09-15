@@ -940,57 +940,7 @@ impl Content {
                 let base: Element<_> = center(text("select a ticker to start").size(16)).into();
 
                 match state.modal {
-                    Some(Modal::LinkGroup) => {
-                        // LinkGroup selection overlay
-                        let mut grid = iced::widget::Column::new().spacing(4);
-                        let rows = LinkGroup::ALL.chunks(3);
-
-                        for row_groups in rows {
-                            let mut button_row = iced::widget::Row::new().spacing(4);
-
-                            for &group in row_groups {
-                                let is_selected = state.link_group == Some(group);
-                                let btn = if is_selected {
-                                    button_with_tooltip(
-                                        text(group.to_string())
-                                            .font(style::AZERET_MONO)
-                                            .align_x(iced::Alignment::Center),
-                                        Message::SwitchLinkGroup(pane, None),
-                                        Some("Unlink"),
-                                        tooltip::Position::Bottom,
-                                        |theme, status| style::button::transparent(theme, status, true),
-                                    )
-                                } else {
-                                    button(
-                                        text(group.to_string())
-                                            .font(style::AZERET_MONO)
-                                            .align_x(iced::Alignment::Center),
-                                    )
-                                    .style(|theme, status| style::button::transparent(theme, status, false))
-                                    .on_press(Message::SwitchLinkGroup(pane, Some(group)))
-                                    .into()
-                                };
-
-                                button_row = button_row.push(btn);
-                            }
-
-                            grid = grid.push(button_row);
-                        }
-
-                        let content: Element<_> = container(grid)
-                            .max_width(240)
-                            .padding(16)
-                            .style(style::chart_modal)
-                            .into();
-
-                        stack(
-                            base,
-                            content,
-                            Message::ToggleModal(pane, Modal::LinkGroup),
-                            padding::right(12).left(4),
-                            Alignment::Start,
-                        )
-                    }
+                    Some(Modal::LinkGroup) => link_group_overlay(base, state, pane),
                     Some(Modal::TickerBrowser) if show_overlay_in_pane => {
                         if let Some(table) = state.ticker_browser.as_ref() {
                             let content = container(responsive(move |size| {
@@ -1026,57 +976,7 @@ impl Content {
                 }).into();
 
                 match state.modal {
-                    Some(Modal::LinkGroup) => {
-                        // LinkGroup selection overlay
-                        let mut grid = iced::widget::Column::new().spacing(4);
-                        let rows = LinkGroup::ALL.chunks(3);
-
-                        for row_groups in rows {
-                            let mut button_row = iced::widget::Row::new().spacing(4);
-
-                            for &group in row_groups {
-                                let is_selected = state.link_group == Some(group);
-                                let btn = if is_selected {
-                                    button_with_tooltip(
-                                        text(group.to_string())
-                                            .font(style::AZERET_MONO)
-                                            .align_x(iced::Alignment::Center),
-                                        Message::SwitchLinkGroup(pane, None),
-                                        Some("Unlink"),
-                                        tooltip::Position::Bottom,
-                                        |theme, status| style::button::transparent(theme, status, true),
-                                    )
-                                } else {
-                                    button(
-                                        text(group.to_string())
-                                            .font(style::AZERET_MONO)
-                                            .align_x(iced::Alignment::Center),
-                                    )
-                                    .style(|theme, status| style::button::transparent(theme, status, false))
-                                    .on_press(Message::SwitchLinkGroup(pane, Some(group)))
-                                    .into()
-                                };
-
-                                button_row = button_row.push(btn);
-                            }
-
-                            grid = grid.push(button_row);
-                        }
-
-                        let content: Element<_> = container(grid)
-                            .max_width(240)
-                            .padding(16)
-                            .style(style::chart_modal)
-                            .into();
-
-                        stack(
-                            base_with_toasts,
-                            content,
-                            Message::ToggleModal(pane, Modal::LinkGroup),
-                            padding::right(12).left(4),
-                            Alignment::Start,
-                        )
-                    }
+                    Some(Modal::LinkGroup) => link_group_overlay(base_with_toasts, state, pane),
                     Some(Modal::TickerBrowser) if show_overlay_in_pane => {
                         if let Some(table) = state.ticker_browser.as_ref() {
                             let content = container(responsive(move |size| {
@@ -1184,6 +1084,7 @@ impl std::fmt::Display for Content {
     }
 }
 
+
 fn compose_chart_view<'a, F>(
     base: Element<'a, Message>,
     state: &'a State,
@@ -1203,57 +1104,7 @@ where
         .into();
 
     match state.modal {
-        Some(Modal::LinkGroup) => {
-            // Simple grid of link group buttons
-            let mut grid = iced::widget::Column::new().spacing(4);
-            let rows = LinkGroup::ALL.chunks(3);
-
-            for row_groups in rows {
-                let mut button_row = iced::widget::Row::new().spacing(4);
-
-                for &group in row_groups {
-                    let is_selected = state.link_group == Some(group);
-                    let btn = if is_selected {
-                        button_with_tooltip(
-                            text(group.to_string())
-                                .font(style::AZERET_MONO)
-                                .align_x(iced::Alignment::Center),
-                            Message::SwitchLinkGroup(pane, None),
-                            Some("Unlink"),
-                            tooltip::Position::Bottom,
-                            |theme, status| style::button::transparent(theme, status, true),
-                        )
-                    } else {
-                        button(
-                            text(group.to_string())
-                                .font(style::AZERET_MONO)
-                                .align_x(iced::Alignment::Center),
-                        )
-                        .style(|theme, status| style::button::transparent(theme, status, false))
-                        .on_press(Message::SwitchLinkGroup(pane, Some(group)))
-                        .into()
-                    };
-
-                    button_row = button_row.push(btn);
-                }
-
-                grid = grid.push(button_row);
-            }
-
-            let content: Element<_> = container(grid)
-                .max_width(240)
-                .padding(16)
-                .style(style::chart_modal)
-                .into();
-
-            stack(
-                base,
-                content,
-                Message::ToggleModal(pane, Modal::LinkGroup),
-                padding::right(12).left(4),
-                Alignment::Start,
-            )
-        }
+        Some(Modal::LinkGroup) => link_group_overlay(base, state, pane),
         Some(Modal::TickerBrowser) if show_ticker_browser => {
             if let Some(table) = state.ticker_browser.as_ref() {
                 let content = container(responsive(move |size| {
@@ -1302,4 +1153,60 @@ where
         ),
         None => base,
     }
+}
+
+fn link_group_overlay<'a>(
+    base: Element<'a, Message>,
+    state: &'a State,
+    pane: pane_grid::Pane,
+) -> Element<'a, Message> {
+    // Simple grid of link group buttons
+    let mut grid = iced::widget::Column::new().spacing(4);
+    let rows = LinkGroup::ALL.chunks(3);
+
+    for row_groups in rows {
+        let mut button_row = iced::widget::Row::new().spacing(4);
+
+        for &group in row_groups {
+            let is_selected = state.link_group == Some(group);
+            let btn: Element<'_, Message> = if is_selected {
+                button_with_tooltip(
+                    text(group.to_string())
+                        .font(style::AZERET_MONO)
+                        .align_x(iced::Alignment::Center),
+                    Message::SwitchLinkGroup(pane, None),
+                    Some("Unlink"),
+                    tooltip::Position::Bottom,
+                    |theme, status| style::button::transparent(theme, status, true),
+                )
+            } else {
+                button(
+                    text(group.to_string())
+                        .font(style::AZERET_MONO)
+                        .align_x(iced::Alignment::Center),
+                )
+                .style(|theme, status| style::button::transparent(theme, status, false))
+                .on_press(Message::SwitchLinkGroup(pane, Some(group)))
+                .into()
+            };
+
+            button_row = button_row.push(btn);
+        }
+
+        grid = grid.push(button_row);
+    }
+
+    let content: Element<_> = container(grid)
+        .max_width(240)
+        .padding(16)
+        .style(style::chart_modal)
+        .into();
+
+    stack(
+        base,
+        content,
+        Message::ToggleModal(pane, Modal::LinkGroup),
+        padding::right(12).left(4),
+        Alignment::Start,
+    )
 }
