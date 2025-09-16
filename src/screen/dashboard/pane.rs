@@ -17,7 +17,7 @@ use data::{
         Basis, ChartLayout, VisualConfig,
         indicator::{HeatmapIndicator, Indicator, KlineIndicator},
     },
-    layout::pane::Settings,
+    layout::pane::{Settings, LinkGroup},
 };
 use exchange::{
     Kline, OpenInterest, TickMultiplier, Ticker, TickerInfo, Timeframe,
@@ -53,6 +53,8 @@ pub enum Modal {
     Settings,
     Indicators,
     TickerBrowser,
+    LinkGroup,
+    Controls,
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +87,7 @@ pub enum Message {
         pane_grid::Pane,
         crate::modal::pane::settings::study::Message,
     ),
+    SwitchLinkGroup(pane_grid::Pane, Option<LinkGroup>),
 }
 
 pub struct State {
@@ -96,6 +99,7 @@ pub struct State {
     pub streams: Vec<StreamKind>,
     pub status: Status,
     pub ticker_browser: Option<tickers_table::TickersTable>,
+    pub link_group: Option<LinkGroup>,
 }
 
 impl State {
@@ -328,6 +332,11 @@ impl State {
             .spacing(8)
             .height(Length::Fixed(32.0));
 
+        // Link group button
+        stream_info_element = stream_info_element.push(
+            widget::link_group_button(id, self.link_group, |pid| Message::ToggleModal(pid, Modal::LinkGroup)),
+        );
+
         // Always show ticker button, even on new/reset panes
         let ticker_button = if let Some((exchange, ticker)) = self.stream_pair() {
             let exchange_info = match exchange {
@@ -350,7 +359,6 @@ impl State {
                 }
             };
 
-            // Make the entire ticker pill (icon + text) a rounded button to open browser
             button(
                 row![exchange_info, text(ticker_str).size(14)]
                     .align_y(Vertical::Center)
@@ -365,7 +373,6 @@ impl State {
                 }
             )
         } else {
-            // Show search icon button for new/reset panes
             button(icon_text(Icon::Search, 14))
                 .style(|theme, status| style::button::modifier(theme, status, false))
                 .on_press(Message::OpenTickerBrowser(id))
@@ -446,12 +453,70 @@ impl State {
 
         let show_overlay_in_pane = (window != main_window.id) || maximized;
 
-        let content = pane_grid::Content::new(self.content.view(id, self, timezone, show_overlay_in_pane))
+        let mut pane_element: Element<'_, Message> = self
+            .content
+            .view(id, self, timezone, show_overlay_in_pane);
+
+        if self.modal == Some(Modal::Controls) {
+            let controls_row = self.view_controls(
+                id,
+                panes,
+                maximized,
+                window != main_window.id,
+            );
+
+            let controls_overlay: Element<_> = container(controls_row)
+                .padding(8)
+                .style(style::chart_modal)
+                .into();
+
+            pane_element = stack(
+                pane_element,
+                controls_overlay,
+                Message::ToggleModal(id, Modal::Controls),
+                padding::right(12).left(12),
+                Alignment::End,
+            );
+        }
+
+        let content = pane_grid::Content::new(pane_element)
             .style(move |theme| style::pane_background(theme, is_focused));
 
-        let title_bar = pane_grid::TitleBar::new(stream_info_element)
-            .controls(self.view_controls(id, panes, maximized, window != main_window.id))
-            .style(style::pane_title_bar);
+        let full_controls = self.view_controls(id, panes, maximized, window != main_window.id);
+
+        let has_any_controls = {
+            let not_starter = !matches!(&self.content, Content::Starter);
+            let multi_panes = panes > 1;
+            let is_popout = window != main_window.id;
+            not_starter || multi_panes || is_popout
+        };
+
+        let title_bar = if has_any_controls {
+            let is_active = self.modal == Some(Modal::Controls);
+            let compact_control: Element<_> = container(
+                button(text("...").size(13).align_y(Alignment::End))
+                    .on_press(Message::ToggleModal(id, Modal::Controls))
+                    .style(move |theme, status| style::button::transparent(theme, status, is_active)),
+            )
+            .align_y(Alignment::Center)
+            .height(Length::Fixed(32.0))
+            .padding(4)
+            .into();
+
+            let controls = if self.modal == Some(Modal::Controls) {
+                pane_grid::Controls::new(compact_control)
+            } else {
+                pane_grid::Controls::dynamic(full_controls, compact_control)
+            };
+
+            pane_grid::TitleBar::new(stream_info_element)
+                .controls(controls)
+                .style(style::pane_title_bar)
+        } else {
+            pane_grid::TitleBar::new(stream_info_element)
+                .controls(full_controls)
+                .style(style::pane_title_bar)
+        };
 
         content.title_bar(if self.modal.is_none() {
             title_bar
@@ -493,7 +558,6 @@ impl State {
             ));
         }
 
-        // Search moved to the title (ticker area); remove old control button
 
         if matches!(&self.content, Content::Heatmap(_, _) | Content::Kline(_, _)) {
             buttons = buttons.push(button_with_tooltip(
@@ -552,6 +616,18 @@ impl State {
             .align_y(Vertical::Center)
             .height(Length::Fixed(32.0))
             .into()
+    }
+
+    pub fn identifier_str(&self) -> String {
+        match &self.content {
+            Content::Starter => "starter".to_string(),
+            Content::Heatmap(_, _) => "heatmap".to_string(),
+            Content::Kline(chart, _) => match chart.kind() {
+                data::chart::KlineChartKind::Footprint { .. } => "footprint".to_string(),
+                data::chart::KlineChartKind::Candles => "candlestick".to_string(),
+            },
+            Content::TimeAndSales(_) => "time&sales".to_string(),
+        }
     }
 
     pub fn matches_stream(&self, stream: &StreamKind) -> bool {
@@ -663,6 +739,7 @@ impl Default for State {
             notifications: vec![],
             status: Status::Ready,
             ticker_browser: None,
+            link_group: None,
         }
     }
 }
@@ -715,7 +792,7 @@ impl Content {
     }
 
     fn new_kline(
-        content_str: &str, // "footprint" or "candlestick"
+        content_str: &str, 
         current_content: &Content,
         ticker_info: TickerInfo,
         settings: &Settings,
@@ -743,7 +820,6 @@ impl Content {
                     }),
             ),
             _ => (
-                // "candlestick"
                 Timeframe::M15,
                 data::chart::KlineChartKind::Candles,
             ),
@@ -922,6 +998,7 @@ impl Content {
                 let base: Element<_> = center(text("select a ticker to start").size(16)).into();
 
                 match state.modal {
+                    Some(Modal::LinkGroup) => link_group_overlay(base, state, pane),
                     Some(Modal::TickerBrowser) if show_overlay_in_pane => {
                         if let Some(table) = state.ticker_browser.as_ref() {
                             let content = container(responsive(move |size| {
@@ -957,6 +1034,7 @@ impl Content {
                 }).into();
 
                 match state.modal {
+                    Some(Modal::LinkGroup) => link_group_overlay(base_with_toasts, state, pane),
                     Some(Modal::TickerBrowser) if show_overlay_in_pane => {
                         if let Some(table) = state.ticker_browser.as_ref() {
                             let content = container(responsive(move |size| {
@@ -1064,6 +1142,7 @@ impl std::fmt::Display for Content {
     }
 }
 
+
 fn compose_chart_view<'a, F>(
     base: Element<'a, Message>,
     state: &'a State,
@@ -1083,6 +1162,7 @@ where
         .into();
 
     match state.modal {
+        Some(Modal::LinkGroup) => link_group_overlay(base, state, pane),
         Some(Modal::TickerBrowser) if show_ticker_browser => {
             if let Some(table) = state.ticker_browser.as_ref() {
                 let content = container(responsive(move |size| {
@@ -1106,7 +1186,6 @@ where
         }
         Some(Modal::TickerBrowser) => base,
         Some(Modal::StreamModifier) => {
-            // Only show StreamModifier by itself
             stack(
                 base,
                 modal::stream::view(pane, stream_modifier, state.stream_pair()),
@@ -1129,6 +1208,63 @@ where
             padding::right(12).left(12),
             Alignment::End,
         ),
+
+        Some(_) => base,
         None => base,
     }
+}
+
+fn link_group_overlay<'a>(
+    base: Element<'a, Message>,
+    state: &'a State,
+    pane: pane_grid::Pane,
+) -> Element<'a, Message> {
+    let mut grid = iced::widget::Column::new().spacing(4);
+    let rows = LinkGroup::ALL.chunks(3);
+
+    for row_groups in rows {
+        let mut button_row = iced::widget::Row::new().spacing(4);
+
+        for &group in row_groups {
+            let is_selected = state.link_group == Some(group);
+            let btn: Element<'_, Message> = if is_selected {
+                button_with_tooltip(
+                    text(group.to_string())
+                        .font(style::AZERET_MONO)
+                        .align_x(iced::Alignment::Center),
+                    Message::SwitchLinkGroup(pane, None),
+                    Some("Unlink"),
+                    tooltip::Position::Bottom,
+                    |theme, status| style::button::transparent(theme, status, true),
+                )
+            } else {
+                button(
+                    text(group.to_string())
+                        .font(style::AZERET_MONO)
+                        .align_x(iced::Alignment::Center),
+                )
+                .style(|theme, status| style::button::transparent(theme, status, false))
+                .on_press(Message::SwitchLinkGroup(pane, Some(group)))
+                .into()
+            };
+
+            button_row = button_row.push(btn);
+        }
+
+        grid = grid.push(button_row);
+    }
+
+    let content: Element<_> = container(grid)
+        .max_width(240)
+        .padding(16)
+        .style(style::chart_modal)
+        .into();
+
+    stack(
+        base,
+        content,
+        Message::ToggleModal(pane, Modal::LinkGroup),
+        padding::right(12).left(4),
+        Alignment::Start,
+    )
 }

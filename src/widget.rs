@@ -196,3 +196,35 @@ where
     ]
     .into()
 }
+
+pub fn link_group_button<'a, Message, F>(
+    id: iced::widget::pane_grid::Pane,
+    link_group: Option<data::layout::pane::LinkGroup>,
+    on_press: F,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'static,
+    F: Fn(iced::widget::pane_grid::Pane) -> Message + 'static,
+{
+    let is_active = link_group.is_some();
+
+    let icon = if let Some(group) = link_group {
+        text(group.to_string())
+            .font(style::AZERET_MONO)
+            .align_x(Alignment::Start)
+            .align_y(Alignment::Center)
+    } else {
+        // Show link icon when unlinked
+        crate::style::icon_text(crate::style::Icon::Link, 12)
+            .align_x(Alignment::Start)
+            .align_y(Alignment::Center)
+    };
+
+    button(icon)
+        .style(move |theme: &Theme, status| {
+            style::button::transparent(theme, status, is_active)
+        })
+        .on_press(on_press(id))
+        .width(28)
+        .into()
+}

@@ -222,7 +222,7 @@ pub trait Layout<'a, Message, Theme, Renderer, State> {
     fn layout(
         &self,
         state: &mut State,
-        inner: &Element<'a, Message, Theme, Renderer>,
+        inner: &mut Element<'a, Message, Theme, Renderer>,
         tree: &mut iced::advanced::widget::Tree,
         renderer: &Renderer,
         limits: &iced::advanced::layout::Limits,
@@ -236,12 +236,12 @@ where
     fn layout(
         &self,
         _state: &mut State,
-        inner: &Element<'a, Message, Theme, Renderer>,
+        inner: &mut Element<'a, Message, Theme, Renderer>,
         tree: &mut iced::advanced::widget::Tree,
         renderer: &Renderer,
         limits: &iced::advanced::layout::Limits,
     ) -> layout::Node {
-        inner.as_widget().layout(tree, renderer, limits)
+        inner.as_widget_mut().layout(tree, renderer, limits)
     }
 }
 
@@ -249,7 +249,7 @@ impl<'a, T, Message, Theme, Renderer, State> Layout<'a, Message, Theme, Renderer
 where
     T: Fn(
             &mut State,
-            &Element<'a, Message, Theme, Renderer>,
+            &mut Element<'a, Message, Theme, Renderer>,
             &mut iced::advanced::widget::Tree,
             &Renderer,
             &iced::advanced::layout::Limits,
@@ -259,7 +259,7 @@ where
     fn layout(
         &self,
         state: &mut State,
-        inner: &Element<'a, Message, Theme, Renderer>,
+        inner: &mut Element<'a, Message, Theme, Renderer>,
         tree: &mut iced::advanced::widget::Tree,
         renderer: &Renderer,
         limits: &iced::advanced::layout::Limits,
@@ -476,7 +476,7 @@ pub trait Operate<'a, Message, Theme, Renderer, State> {
     fn operate(
         &self,
         state: &mut State,
-        inner: &Element<'a, Message, Theme, Renderer>,
+        inner: &mut Element<'a, Message, Theme, Renderer>,
         tree: &mut advanced::widget::Tree,
         layout: advanced::Layout<'_>,
         renderer: &Renderer,
@@ -491,13 +491,13 @@ where
     fn operate(
         &self,
         _state: &mut State,
-        inner: &Element<'a, Message, Theme, Renderer>,
+        inner: &mut Element<'a, Message, Theme, Renderer>,
         tree: &mut advanced::widget::Tree,
         layout: advanced::Layout<'_>,
         renderer: &Renderer,
         operation: &mut dyn advanced::widget::Operation<()>,
     ) {
-        inner.as_widget().operate(tree, layout, renderer, operation);
+        inner.as_widget_mut().operate(tree, layout, renderer, operation);
     }
 }
 
@@ -505,7 +505,7 @@ impl<'a, T, Message, Theme, Renderer, State> Operate<'a, Message, Theme, Rendere
 where
     T: Fn(
             &mut State,
-            &Element<'a, Message, Theme, Renderer>,
+            &mut Element<'a, Message, Theme, Renderer>,
             &mut advanced::widget::Tree,
             advanced::Layout<'_>,
             &Renderer,
@@ -515,7 +515,7 @@ where
     fn operate(
         &self,
         state: &mut State,
-        inner: &Element<'a, Message, Theme, Renderer>,
+        inner: &mut Element<'a, Message, Theme, Renderer>,
         tree: &mut advanced::widget::Tree,
         layout: advanced::Layout<'_>,
         renderer: &Renderer,
@@ -636,14 +636,14 @@ where
     }
 
     fn layout(
-        &self,
+        &mut self,
         tree: &mut iced::advanced::widget::Tree,
         renderer: &Renderer,
         limits: &iced::advanced::layout::Limits,
     ) -> iced::advanced::layout::Node {
         self.layout.layout(
             tree.state.downcast_mut(),
-            &self.inner,
+            &mut self.inner,
             &mut tree.children[0],
             renderer,
             limits,
@@ -718,7 +718,7 @@ where
     }
 
     fn operate(
-        &self,
+        &mut self,
         tree: &mut advanced::widget::Tree,
         layout: advanced::Layout<'_>,
         renderer: &Renderer,
@@ -726,7 +726,7 @@ where
     ) {
         self.operate.operate(
             tree.state.downcast_mut(),
-            &self.inner,
+            &mut self.inner,
             &mut tree.children[0],
             layout,
             renderer,
