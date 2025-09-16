@@ -54,6 +54,7 @@ pub enum Modal {
     Indicators,
     TickerBrowser,
     LinkGroup,
+    Controls,
 }
 
 #[derive(Debug, Clone)]
@@ -452,12 +453,70 @@ impl State {
 
         let show_overlay_in_pane = (window != main_window.id) || maximized;
 
-        let content = pane_grid::Content::new(self.content.view(id, self, timezone, show_overlay_in_pane))
+        let mut pane_element: Element<'_, Message> = self
+            .content
+            .view(id, self, timezone, show_overlay_in_pane);
+
+        if self.modal == Some(Modal::Controls) {
+            let controls_row = self.view_controls(
+                id,
+                panes,
+                maximized,
+                window != main_window.id,
+            );
+
+            let controls_overlay: Element<_> = container(controls_row)
+                .padding(8)
+                .style(style::chart_modal)
+                .into();
+
+            pane_element = stack(
+                pane_element,
+                controls_overlay,
+                Message::ToggleModal(id, Modal::Controls),
+                padding::right(12).left(12),
+                Alignment::End,
+            );
+        }
+
+        let content = pane_grid::Content::new(pane_element)
             .style(move |theme| style::pane_background(theme, is_focused));
 
-        let title_bar = pane_grid::TitleBar::new(stream_info_element)
-            .controls(self.view_controls(id, panes, maximized, window != main_window.id))
-            .style(style::pane_title_bar);
+        let full_controls = self.view_controls(id, panes, maximized, window != main_window.id);
+
+        let has_any_controls = {
+            let not_starter = !matches!(&self.content, Content::Starter);
+            let multi_panes = panes > 1;
+            let is_popout = window != main_window.id;
+            not_starter || multi_panes || is_popout
+        };
+
+        let title_bar = if has_any_controls {
+            let is_active = self.modal == Some(Modal::Controls);
+            let compact_control: Element<_> = container(
+                button(text("...").size(13).align_y(Alignment::End))
+                    .on_press(Message::ToggleModal(id, Modal::Controls))
+                    .style(move |theme, status| style::button::transparent(theme, status, is_active)),
+            )
+            .align_y(Alignment::Center)
+            .height(Length::Fixed(32.0))
+            .padding(4)
+            .into();
+
+            let controls = if self.modal == Some(Modal::Controls) {
+                pane_grid::Controls::new(compact_control)
+            } else {
+                pane_grid::Controls::dynamic(full_controls, compact_control)
+            };
+
+            pane_grid::TitleBar::new(stream_info_element)
+                .controls(controls)
+                .style(style::pane_title_bar)
+        } else {
+            pane_grid::TitleBar::new(stream_info_element)
+                .controls(full_controls)
+                .style(style::pane_title_bar)
+        };
 
         content.title_bar(if self.modal.is_none() {
             title_bar
@@ -761,7 +820,6 @@ impl Content {
                     }),
             ),
             _ => (
-                // "candlestick"
                 Timeframe::M15,
                 data::chart::KlineChartKind::Candles,
             ),
@@ -1128,7 +1186,6 @@ where
         }
         Some(Modal::TickerBrowser) => base,
         Some(Modal::StreamModifier) => {
-            // Only show StreamModifier by itself
             stack(
                 base,
                 modal::stream::view(pane, stream_modifier, state.stream_pair()),
@@ -1151,6 +1208,8 @@ where
             padding::right(12).left(12),
             Alignment::End,
         ),
+
+        Some(_) => base,
         None => base,
     }
 }
@@ -1160,7 +1219,6 @@ fn link_group_overlay<'a>(
     state: &'a State,
     pane: pane_grid::Pane,
 ) -> Element<'a, Message> {
-    // Simple grid of link group buttons
     let mut grid = iced::widget::Column::new().spacing(4);
     let rows = LinkGroup::ALL.chunks(3);
 
