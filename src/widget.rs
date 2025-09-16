@@ -23,13 +23,15 @@ pub fn tooltip<'a, Message: 'a>(
     position: Position,
 ) -> Element<'a, Message> {
     match tooltip {
-        Some(tooltip) => iced::widget::tooltip(
-            content,
-            container(text(tooltip)).style(style::tooltip).padding(8),
-            position,
-        )
-        .into(),
-        None => content.into(),
+        Some(text_value) if !text_value.is_empty() => {
+            iced::widget::tooltip::Tooltip::new(
+                content,
+                container(text(text_value)).style(style::tooltip).padding(8),
+                position,
+            )
+            .into()
+        }
+        _ => content.into(),
     }
 }
 
