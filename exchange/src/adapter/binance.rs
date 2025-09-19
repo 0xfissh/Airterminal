@@ -16,7 +16,7 @@ use super::{
     super::{
         Exchange, Kline, MarketKind, OpenInterest, StreamKind, Ticker, TickerInfo, TickerStats,
         Timeframe, Trade,
-        connect::{State, setup_tcp_connection, setup_tls_connection, setup_websocket_connection},
+        connect::{State, connect_ws},
         de_string_to_f32,
         depth::{DepthPayload, DepthUpdate, LocalDepthCache, Order},
         limiter::{self, RateLimiter},
@@ -280,10 +280,8 @@ async fn connect(
     domain: &str,
     streams: &str,
 ) -> Result<FragmentCollector<TokioIo<Upgraded>>, StreamError> {
-    let tcp_stream = setup_tcp_connection(domain).await?;
-    let tls_stream = setup_tls_connection(domain, tcp_stream).await?;
     let url = format!("wss://{domain}/stream?streams={streams}");
-    setup_websocket_connection(domain, tls_stream, &url).await
+    connect_ws(domain, &url).await
 }
 
 async fn try_resync(

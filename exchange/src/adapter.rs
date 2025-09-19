@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 pub mod binance;
 pub mod bybit;
 pub mod hyperliquid;
+pub mod okx;
 
 #[derive(thiserror::Error, Debug)]
 pub enum StreamError {
@@ -195,6 +196,9 @@ pub enum Exchange {
     BybitInverse,
     BybitSpot,
     HyperliquidPerps,
+    OkxLinear,
+    OkxInverse,
+    OkxSpot,
 }
 
 impl std::fmt::Display for Exchange {
@@ -210,6 +214,9 @@ impl std::fmt::Display for Exchange {
                 Exchange::BybitInverse => "Bybit Inverse",
                 Exchange::BybitSpot => "Bybit Spot",
                 Exchange::HyperliquidPerps => "Hyperliquid Perps",
+                Exchange::OkxLinear => "Okx Linear",
+                Exchange::OkxInverse => "Okx Inverse",
+                Exchange::OkxSpot => "Okx Spot",
             }
         )
     }
@@ -227,13 +234,16 @@ impl FromStr for Exchange {
             "Bybit Inverse" => Ok(Exchange::BybitInverse),
             "Bybit Spot" => Ok(Exchange::BybitSpot),
             "Hyperliquid Perps" => Ok(Exchange::HyperliquidPerps),
+            "Okx Linear" => Ok(Exchange::OkxLinear),
+            "Okx Inverse" => Ok(Exchange::OkxInverse),
+            "Okx Spot" => Ok(Exchange::OkxSpot),
             _ => Err(format!("Invalid exchange: {}", s)),
         }
     }
 }
 
 impl Exchange {
-    pub const ALL: [Exchange; 7] = [
+    pub const ALL: [Exchange; 10] = [
         Exchange::BinanceLinear,
         Exchange::BinanceInverse,
         Exchange::BinanceSpot,
@@ -241,6 +251,9 @@ impl Exchange {
         Exchange::BybitInverse,
         Exchange::BybitSpot,
         Exchange::HyperliquidPerps,
+        Exchange::OkxLinear,
+        Exchange::OkxInverse,
+        Exchange::OkxSpot,
     ];
 
     pub fn get_market_type(&self) -> MarketKind {
@@ -249,6 +262,8 @@ impl Exchange {
             Exchange::BinanceInverse | Exchange::BybitInverse => MarketKind::InversePerps,
             Exchange::BinanceSpot | Exchange::BybitSpot => MarketKind::Spot,
             Exchange::HyperliquidPerps => MarketKind::LinearPerps,
+            Exchange::OkxLinear | Exchange::OkxInverse => MarketKind::InversePerps,
+            Exchange::OkxSpot => MarketKind::Spot,
         }
     }
 }
@@ -293,6 +308,9 @@ pub async fn fetch_ticker_info(
         Exchange::HyperliquidPerps => {
             hyperliquid::fetch_ticksize(market_type).await
         }
+        Exchange::OkxLinear | Exchange::OkxInverse | Exchange::OkxSpot => {
+            okx::fetch_ticksize(market_type).await
+        }
     }
 }
 
@@ -310,6 +328,9 @@ pub async fn fetch_ticker_prices(
         }
         Exchange::HyperliquidPerps => {
             hyperliquid::fetch_ticker_prices(market_type).await
+        }
+        Exchange::OkxLinear | Exchange::OkxInverse | Exchange::OkxSpot => {
+            okx::fetch_ticker_prices(market_type).await
         }
     }
 }
@@ -331,6 +352,9 @@ pub async fn fetch_klines(
         Exchange::HyperliquidPerps => {
             hyperliquid::fetch_klines(ticker, timeframe, range).await
         }
+        Exchange::OkxLinear | Exchange::OkxInverse | Exchange::OkxSpot => {
+            okx::fetch_klines(ticker, timeframe, range).await
+        }
     }
 }
 
@@ -349,6 +373,12 @@ pub async fn fetch_open_interest(
         }
         Exchange::HyperliquidPerps => {
             hyperliquid::fetch_historical_oi(ticker, range, timeframe).await
+        }
+        Exchange::OkxLinear | Exchange::OkxInverse => {
+            okx::fetch_historical_oi(ticker, range, timeframe).await
+        }
+        Exchange::OkxSpot => {
+            okx::fetch_historical_oi(ticker, range, timeframe).await
         }
         _ => Err(StreamError::InvalidRequest("Invalid exchange".to_string())),
     }

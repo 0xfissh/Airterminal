@@ -167,6 +167,9 @@ impl SerTicker {
             Exchange::BybitInverse => "BybitInverse",
             Exchange::BybitSpot => "BybitSpot",
             Exchange::HyperliquidPerps => "HyperliquidPerps",
+            Exchange::OkxLinear => "OkxLinear",
+            Exchange::OkxInverse => "OkxInverse",
+            Exchange::OkxSpot => "OkxSpot",
         }
     }
 
@@ -179,6 +182,9 @@ impl SerTicker {
             "BybitInverse" => Ok(Exchange::BybitInverse),
             "BybitSpot" => Ok(Exchange::BybitSpot),
             "HyperliquidPerps" => Ok(Exchange::HyperliquidPerps),
+            "OkxLinear" => Ok(Exchange::OkxLinear),
+            "OkxInverse" => Ok(Exchange::OkxInverse),
+            "OkxSpot" => Ok(Exchange::OkxSpot),
             _ => Err(format!("Unknown exchange: {}", s)),
         }
     }

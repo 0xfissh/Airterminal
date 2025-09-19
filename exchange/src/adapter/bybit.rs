@@ -16,7 +16,7 @@ use super::{
     super::{
         Exchange, Kline, MarketKind, OpenInterest, StreamKind, Ticker, TickerInfo, TickerStats,
         Timeframe, Trade,
-        connect::{State, setup_tcp_connection, setup_tls_connection, setup_websocket_connection},
+        connect::{State, connect_ws},
         de_string_to_f32, de_string_to_u64,
         depth::{DepthPayload, DepthUpdate, LocalDepthCache, Order},
 
@@ -250,8 +250,6 @@ async fn connect(
     domain: &str,
     market_type: MarketKind,
 ) -> Result<FragmentCollector<TokioIo<Upgraded>>, StreamError> {
-    let tcp_stream = setup_tcp_connection(domain).await?;
-    let tls_stream = setup_tls_connection(domain, tcp_stream).await?;
     let url = format!(
         "wss://stream.bybit.com/v5/public/{}",
         match market_type {
@@ -260,7 +258,7 @@ async fn connect(
             MarketKind::InversePerps => "inverse",
         }
     );
-    setup_websocket_connection(domain, tls_stream, &url).await
+    connect_ws(domain, &url).await
 }
 
 async fn try_connect(

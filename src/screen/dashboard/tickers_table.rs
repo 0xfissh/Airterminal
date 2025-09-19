@@ -63,6 +63,7 @@ pub enum TickerTab {
     Bybit,
     Binance,
     Hyperliquid,
+    Okx,
     Favorites,
 }
 
@@ -566,6 +567,10 @@ impl TickersTable {
                 ex,
                 Exchange::HyperliquidPerps
             ),
+            TickerTab::Okx => matches!(
+                ex,
+                Exchange::OkxLinear | Exchange::OkxInverse | Exchange::OkxSpot
+            ),
             _ => false,
         }
     }
@@ -636,7 +641,7 @@ impl TickersTable {
         if self.show_sort_options {
             // First row: sort buttons
             header_height += SORT_BUTTON_ROW_HEIGHT;
-            // Optional market filter row for All/Bybit/Binance
+            // Optional market filter row for All/Bybit/Binance/Okx
             let show_market_filters = matches!(
                 self.selected_tab,
                 TickerTab::All | TickerTab::Bybit | TickerTab::Binance
@@ -714,8 +719,8 @@ impl TickersTable {
         match message {
             Message::ChangeTickersTableTab(tab) => {
                 self.selected_tab = tab.clone();
-                // Clear market filter when switching to Hyperliquid since it doesn't support spot/inverse
-                if matches!(tab, TickerTab::Hyperliquid) {
+            // Clear market filter when switching to Hyperliquid (no spot/inverse distinction)
+            if matches!(tab, TickerTab::Hyperliquid) {
                     self.selected_market = None;
                 }
                 self.needs_filter_update = true;
@@ -947,9 +952,9 @@ impl TickersTable {
 
         let sort_options_column = {
             // Only show market filters for exchanges that support them
-            let show_spot = matches!(self.selected_tab, TickerTab::All | TickerTab::Bybit | TickerTab::Binance);
-            let show_linear = matches!(self.selected_tab, TickerTab::All | TickerTab::Bybit | TickerTab::Binance);
-            let show_inverse = matches!(self.selected_tab, TickerTab::All | TickerTab::Bybit | TickerTab::Binance);
+            let show_spot = matches!(self.selected_tab, TickerTab::All | TickerTab::Bybit | TickerTab::Binance | TickerTab::Okx);
+            let show_linear = matches!(self.selected_tab, TickerTab::All | TickerTab::Bybit | TickerTab::Binance | TickerTab::Okx);
+            let show_inverse = matches!(self.selected_tab, TickerTab::All | TickerTab::Bybit | TickerTab::Binance | TickerTab::Okx);
             
             let spot_market_button = button(text("Spot").align_x(Horizontal::Center))
                 .on_press(Message::SetMarketFilter(Some(MarketKind::Spot)))
@@ -1098,6 +1103,10 @@ impl TickersTable {
                 create_tab_button(icon_text(Icon::HyperliquidLogo, 16).align_x(Horizontal::Center), &self.selected_tab, TickerTab::Hyperliquid)
                     .width(Length::FillPortion(1))
                     .height(Length::Fixed(32.0));
+            let okx_button =
+                create_tab_button(icon_text(Icon::OkxLogo, 16).align_x(Horizontal::Center), &self.selected_tab, TickerTab::Okx)
+                    .width(Length::FillPortion(1))
+                    .height(Length::Fixed(32.0));
             let favorites_button = create_tab_button(
                 icon_text(Icon::StarFilled, 18).align_x(Horizontal::Center),
                 &self.selected_tab,
@@ -1112,6 +1121,7 @@ impl TickersTable {
                 bybit_button,
                 binance_button,
                 hyperliquid_button,
+                okx_button,
             ]
             .spacing(8)
             .width(Length::Fill)
@@ -1202,16 +1212,11 @@ fn create_ticker_card_with_focus(
     is_fav: bool,
 ) -> Element<'static, Message> {
     // Left clickable area: icon + ticker name + volume
-    let left_click_area = button(
+            let left_click_area = button(
         row![
-            match exchange {
-                Exchange::BybitInverse
-                | Exchange::BybitLinear
-                | Exchange::BybitSpot => icon_text(Icon::BybitLogo, 12),
-                Exchange::BinanceInverse
-                | Exchange::BinanceLinear
-                | Exchange::BinanceSpot => icon_text(Icon::BinanceLogo, 12),
-                Exchange::HyperliquidPerps => icon_text(Icon::HyperliquidLogo, 10),
+            {
+                let (icon, size) = style::exchange_icon_with_size(exchange);
+                icon_text(icon, size)
             },
             Space::new(Length::Fixed(6.0), Length::Shrink),
             text(display_data.display_ticker.clone()).style(move |theme: &Theme| {
@@ -1395,10 +1400,9 @@ fn create_expanded_ticker_card(
         } else { icon_text(Icon::Star, 12) })
             .on_press(Message::FavoriteTicker(exchange, *ticker))
             .style(|theme, status| style::button::transparent(theme, status, false)),
-        match exchange {
-            Exchange::BybitInverse | Exchange::BybitLinear | Exchange::BybitSpot => icon_text(Icon::BybitLogo, 12),
-            Exchange::BinanceInverse | Exchange::BinanceLinear | Exchange::BinanceSpot => icon_text(Icon::BinanceLogo, 12),
-            Exchange::HyperliquidPerps => icon_text(Icon::HyperliquidLogo, 10),
+        {
+            let (icon, size) = style::exchange_icon_with_size(exchange);
+            icon_text(icon, size)
         },
         text(format!("{} {}{}", ticker_str, market.to_string(), match market { MarketKind::Spot => "", MarketKind::LinearPerps | MarketKind::InversePerps => " Perp" })).size(14),
         Space::new(Length::Fill, Length::Shrink),
