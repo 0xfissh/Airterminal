@@ -1,10 +1,11 @@
 use crate::adapter::StreamError;
 
-use reqwest::{Client, Response};
+use reqwest::{Client, Method, Response};
+use serde_json::Value;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
-static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
+pub static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 
 pub trait RateLimiter: Send + Sync {
     /// Prepare for a request with given weight. Returns wait time if needed.
@@ -21,39 +22,38 @@ pub async fn http_request_with_limiter<L: RateLimiter>(
     url: &str,
     limiter: &tokio::sync::Mutex<L>,
     weight: usize,
+    method: Option<Method>,
+    json_body: Option<&Value>,
 ) -> Result<String, StreamError> {
-    // Check rate limit and wait if necessary
-    {
-        let mut limiter_guard = limiter.lock().await;
-        if let Some(wait_time) = limiter_guard.prepare_request(weight) {
-            drop(limiter_guard); // Release lock before sleeping
-            log::warn!("Rate limit hit for: {}. Waiting for {:?}", url, wait_time);
-            tokio::time::sleep(wait_time).await;
-        }
-        // Lock is automatically released here when limiter_guard goes out of scope
+    let method = method.unwrap_or(Method::GET);
+
+    let mut limiter_guard = limiter.lock().await;
+
+    if let Some(wait_time) = limiter_guard.prepare_request(weight) {
+        log::warn!("Rate limit hit for: {url}. Waiting for {:?}", wait_time);
+        tokio::time::sleep(wait_time).await;
     }
 
-    // Make the HTTP request without holding the lock
-    let response = HTTP_CLIENT
-        .get(url)
+    let mut request_builder = HTTP_CLIENT.request(method, url);
+
+    if let Some(body) = json_body {
+        request_builder = request_builder.json(body);
+    }
+
+    let response = request_builder
         .send()
         .await
         .map_err(StreamError::FetchError)?;
 
-    // Re-acquire lock only for response processing
-    {
-        let mut limiter_guard = limiter.lock().await;
-        
-        if limiter_guard.should_exit_on_response(&response) {
-            log::error!("Rate limit exceeded for: {}", url);
-            return Err(StreamError::InvalidRequest(format!(
-                "Rate limit exceeded for: {}",
-                url
-            )));
-        }
-
-        limiter_guard.update_from_response(&response, weight);
+    if limiter_guard.should_exit_on_response(&response) {
+        let status = response.status();
+        eprintln!(
+            "HTTP error {status} for: {url}. Exiting. (This may be a rate limit, geo-block, or other access issue.)",
+        );
+        std::process::exit(1);
     }
+
+    limiter_guard.update_from_response(&response, weight);
 
     response.text().await.map_err(StreamError::FetchError)
 }
@@ -77,12 +77,17 @@ impl FixedWindowBucket {
     }
 
     fn refill(&mut self) {
-        let now = Instant::now();
-        let elapsed = now.duration_since(self.last_refill);
-        
-        if elapsed >= self.refill_rate {
-            self.available_tokens = self.max_tokens;
-            self.last_refill = now;
+        if let Ok(current_time) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        {
+            let now = Instant::now();
+            let period_seconds = self.refill_rate.as_secs();
+            let seconds_in_current_period = current_time.as_secs() % period_seconds;
+
+            let elapsed = now.duration_since(self.last_refill);
+            if elapsed >= self.refill_rate || seconds_in_current_period < 1 {
+                self.available_tokens = self.max_tokens;
+                self.last_refill = now;
+            }
         }
     }
 
@@ -102,7 +107,7 @@ impl FixedWindowBucket {
 
     pub fn consume_tokens(&mut self, tokens: usize) {
         self.refill();
-        self.available_tokens = self.available_tokens.saturating_sub(tokens);
+        self.available_tokens -= tokens.min(self.available_tokens);
     }
 }
 
@@ -186,4 +191,4 @@ impl DynamicBucket {
             Some(wait_time) => (Some(wait_time), Some(DynamicLimitReason::FixedWindowRate)),
         }
     }
-} 
+}

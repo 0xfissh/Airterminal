@@ -337,19 +337,9 @@ impl State {
             widget::link_group_button(id, self.link_group, |pid| Message::ToggleModal(pid, Modal::LinkGroup)),
         );
 
-        // Always show ticker button, even on new/reset panes
         let ticker_button = if let Some((exchange, ticker)) = self.stream_pair() {
-            let exchange_info = match exchange {
-                Exchange::BinanceSpot | Exchange::BinanceLinear | Exchange::BinanceInverse => {
-                    icon_text(Icon::BinanceLogo, 14)
-                }
-                Exchange::BybitSpot | Exchange::BybitLinear | Exchange::BybitInverse => {
-                    icon_text(Icon::BybitLogo, 14)
-                }
-                Exchange::HyperliquidPerps => {
-                    icon_text(Icon::HyperliquidLogo, 12)
-                }
-            };
+            let (icon, size) = style::exchange_icon_with_size(exchange);
+            let exchange_info = icon_text(icon, size);
 
             let ticker_str = {
                 let symbol = ticker.display_symbol_and_type().0;

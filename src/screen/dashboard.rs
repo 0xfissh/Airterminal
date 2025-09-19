@@ -15,7 +15,7 @@ use data::{UserTimezone, chart::Basis, layout::WindowSpec};
 use exchange::{
     Kline, TickMultiplier, Ticker, TickerInfo, Timeframe, Trade,
     adapter::{
-        self, Exchange, StreamConfig, StreamError, StreamKind, UniqueStreams, binance, bybit, hyperliquid,
+        self, Exchange, StreamConfig, StreamError, StreamKind, UniqueStreams, binance, bybit, hyperliquid, okx,
     },
     depth::Depth,
     fetcher::{FetchRange, FetchedData},
@@ -1946,6 +1946,9 @@ pub fn depth_subscription(exchange: Exchange, ticker: Ticker) -> Subscription<ex
         Exchange::HyperliquidPerps => {
             Subscription::run_with(config, move |cfg| hyperliquid::connect_market_stream(cfg.id))
         }
+        Exchange::OkxSpot | Exchange::OkxLinear | Exchange::OkxInverse => {
+            Subscription::run_with(config, move |cfg| okx::connect_market_stream(cfg.id))
+        }
     }
 }
 
@@ -1968,6 +1971,11 @@ pub fn kline_subscription(
         Exchange::HyperliquidPerps => {
             Subscription::run_with(config, move |cfg| {
                 hyperliquid::connect_kline_stream(cfg.id.clone(), cfg.market_type)
+            })
+        }
+        Exchange::OkxSpot | Exchange::OkxLinear | Exchange::OkxInverse => {
+            Subscription::run_with(config, move |cfg| {
+                okx::connect_kline_stream(cfg.id.clone(), cfg.market_type)
             })
         }
     }

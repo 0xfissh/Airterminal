@@ -21,6 +21,18 @@ pub enum State {
     Connected(FragmentCollector<TokioIo<Upgraded>>),
 }
 
+pub async fn connect_ws(
+    domain: &str,
+    url: &str,
+) -> Result<
+    fastwebsockets::FragmentCollector<hyper_util::rt::TokioIo<hyper::upgrade::Upgraded>>,
+    StreamError,
+> {
+    let tcp_stream = setup_tcp_connection(domain).await?;
+    let tls_stream = setup_tls_connection(domain, tcp_stream).await?;
+    setup_websocket_connection(domain, tls_stream, url).await
+}
+
 struct SpawnExecutor;
 
 impl<Fut> hyper::rt::Executor<Fut> for SpawnExecutor

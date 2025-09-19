@@ -14,7 +14,7 @@ use super::{
     super::{
         Exchange, Kline, MarketKind, OpenInterest, StreamKind, Ticker, TickerInfo, TickerStats,
         Timeframe, Trade,
-        connect::{State, setup_tcp_connection, setup_tls_connection, setup_websocket_connection},
+        connect::{State, connect_ws},
         de_string_to_f32,
         depth::{DepthPayload, DepthUpdate, LocalDepthCache, Order},
         str_f32_parse,
@@ -238,11 +238,8 @@ fn feed_de(slice: &[u8], _market: MarketKind) -> Result<StreamData, StreamError>
 
 async fn connect() -> Result<FragmentCollector<TokioIo<Upgraded>>, StreamError> {
     let domain = HYPERLIQUID_WS_DOMAIN;
-    let tcp_stream = setup_tcp_connection(domain).await?;
-    let tls_stream = setup_tls_connection(domain, tcp_stream).await?;
     let url = format!("wss://{domain}/ws");
-    let ws = setup_websocket_connection(domain, tls_stream, &url).await?;
-    Ok(ws)
+    connect_ws(domain, &url).await
 }
 
 /// Safe volume calculation function to prevent CVD spikes (mirrors Bybit adapter logic)
