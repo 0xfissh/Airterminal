@@ -1,6 +1,3 @@
-Airterminal
-================
-
 ![AirterminalApp Screenshot](./.github/airterminalapp.png)
 
 Airterminal is a high-frequency market intelligence platform engineered for professional traders who need sub-second clarity on market microstructure. Built in Rust with the `iced` GUI toolkit and a GPU-accelerated visualization stack, the platform ingests depth-of-book and on-chain signals from leading derivatives venues, fusing them into a single, latency-aware trading cockpit.
