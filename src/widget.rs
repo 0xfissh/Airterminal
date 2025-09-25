@@ -3,10 +3,10 @@ use crate::style::{self, ICONS_FONT, Icon, modal_container};
 use iced::{
     Alignment::{self, Center},
     Color,
-    Length::Fill,
+    Length::{self, Fill},
     Theme, border,
     widget::{
-        button, column, container, horizontal_space, row, scrollable, slider, text,
+        button, column, container, row, scrollable, slider, text, Space,
         tooltip::Position,
     },
 };
@@ -23,15 +23,13 @@ pub fn tooltip<'a, Message: 'a>(
     position: Position,
 ) -> Element<'a, Message> {
     match tooltip {
-        Some(text_value) if !text_value.is_empty() => {
-            iced::widget::tooltip::Tooltip::new(
-                content,
-                container(text(text_value)).style(style::tooltip).padding(8),
-                position,
-            )
-            .into()
-        }
-        _ => content.into(),
+        Some(tooltip) => iced::widget::tooltip(
+            content,
+            container(text(tooltip)).style(style::tooltip).padding(8),
+            position,
+        )
+        .into(),
+        None => content.into(),
     }
 }
 
@@ -191,7 +189,7 @@ where
 
     iced::widget::stack![
         container(slider).style(modal_container),
-        row![text(label), horizontal_space(), text(to_string(&current))]
+        row![text(label), Space::new().width(Length::Fill), text(to_string(&current))]
             .padding([0, 10])
             .height(Fill)
             .align_y(Center),

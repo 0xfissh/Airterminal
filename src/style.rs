@@ -5,6 +5,7 @@ use iced::widget::pane_grid::{Highlight, Line};
 use iced::widget::scrollable::{Rail, Scroller};
 use iced::widget::{Text, text};
 use iced::{Border, Color, Font, Renderer, Shadow, Theme, widget};
+use exchange::adapter::Exchange;
 
 pub const ICONS_BYTES: &[u8] = include_bytes!("../assets/fonts/icons.ttf");
 pub const ICONS_FONT: Font = Font::with_name("icons");
@@ -56,6 +57,7 @@ pub enum Icon {
     Eye,
     EyeSlash,
     HyperliquidLogo,
+    OkxLogo,
 }
 
 impl From<Icon> for char {
@@ -97,6 +99,7 @@ impl From<Icon> for char {
             Icon::Eye => '\u{E901}', // Using a common eye icon unicode
             Icon::EyeSlash => '\u{E902}', // Using a common eye-slash icon unicode
             Icon::HyperliquidLogo => '\u{E903}',
+            Icon::OkxLogo => '\u{E012}',
         }
     }
 }
@@ -105,6 +108,17 @@ pub fn icon_text<'a>(icon: Icon, size: u16) -> Text<'a, Theme, Renderer> {
     text(char::from(icon).to_string())
         .font(ICONS_FONT)
         .size(iced::Pixels(size.into()))
+}
+
+pub fn exchange_icon_with_size(exchange: Exchange) -> (Icon, u16) {
+    match exchange {
+        Exchange::BybitInverse | Exchange::BybitLinear | Exchange::BybitSpot => (Icon::BybitLogo, 14),
+        Exchange::BinanceInverse | Exchange::BinanceLinear | Exchange::BinanceSpot => {
+            (Icon::BinanceLogo, 14)
+        }
+        Exchange::HyperliquidPerps => (Icon::HyperliquidLogo, 12),
+        Exchange::OkxLinear | Exchange::OkxInverse | Exchange::OkxSpot => (Icon::OkxLogo, 12),
+    }
 }
 
 pub fn title_text(theme: &Theme) -> iced::widget::text::Style {
@@ -568,14 +582,15 @@ pub fn scroll_bar(theme: &Theme, status: widget::scrollable::Status) -> widget::
 }
 
 // custom widgets
-pub fn split_ruler(theme: &Theme) -> iced::widget::rule::Style {
+pub fn split_ruler_container(theme: &Theme) -> iced::widget::container::Style {
     let palette = theme.extended_palette();
 
-    iced::widget::rule::Style {
-        color: palette.background.strong.color.scale_alpha(0.25),
-        radius: iced::border::Radius::default(),
-        fill_mode: iced::widget::rule::FillMode::Full,
-        snap: true,
+    iced::widget::container::Style {
+        background: Some(iced::Background::Color(palette.background.strong.color.scale_alpha(0.25))),
+        border: iced::Border::default(),
+        shadow: Default::default(),
+        snap: false,
+        text_color: None,
     }
 }
 

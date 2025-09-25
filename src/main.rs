@@ -1518,8 +1518,8 @@ impl Airterminal {
         format!("Airterminal [{}]", self.layout_manager.active_layout().name)
     }
 
-    fn scale_factor(&self, _window: window::Id) -> f64 {
-        self.scale_factor.into()
+    fn scale_factor(&self, _window: window::Id) -> f32 {
+        f64::from(self.scale_factor) as f32
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -1796,7 +1796,7 @@ impl Airterminal {
                             ]
                             .align_x(Alignment::Center)
                             .spacing(8),
-                            iced::widget::horizontal_rule(1.0).style(style::split_ruler),
+                            iced::widget::container(iced::widget::Space::new().width(iced::Length::Fill).height(1.0)).style(style::split_ruler_container),
                             self.layout_manager.view().map(Message::Layouts),
                         ]
                         .align_x(Alignment::Center)
@@ -1892,7 +1892,7 @@ impl Airterminal {
             
         let loading_content = column![
             logo,
-            iced::widget::Space::with_height(20),
+            iced::widget::Space::new().height(20),
             loading_text,
         ]
         .spacing(10)
@@ -2078,21 +2078,21 @@ impl Airterminal {
         // Main login form content
         let login_form = column![
             logo,
-            iced::widget::Space::with_height(20),
+            iced::widget::Space::new().height(20),
             title,
-            iced::widget::Space::with_height(10),
+            iced::widget::Space::new().height(10),
             subtitle,
-            iced::widget::Space::with_height(40),
+            iced::widget::Space::new().height(40),
             email_input,
-            iced::widget::Space::with_height(15),
+            iced::widget::Space::new().height(15),
             password_input,
-            iced::widget::Space::with_height(8),
+            iced::widget::Space::new().height(8),
             container(reset_password_link)
                 .width(iced::Length::Fill)
                 .align_x(Alignment::End),
-            iced::widget::Space::with_height(15),
+            iced::widget::Space::new().height(15),
             error_message,
-            iced::widget::Space::with_height(25),
+            iced::widget::Space::new().height(25),
             email_login_button,
         ]
         .spacing(5)
@@ -2174,9 +2174,9 @@ impl Airterminal {
             
             let update_content = column![
                 title,
-                iced::widget::Space::with_height(10),
+                iced::widget::Space::new().height(10),
                 release_notes,
-                iced::widget::Space::with_height(20),
+                iced::widget::Space::new().height(20),
                 button_row.spacing(10),
             ]
             .spacing(5)
@@ -2193,7 +2193,7 @@ impl Airterminal {
             iced::widget::center(update_container).into()
         } else {
             // No update available, return empty element
-            iced::widget::Space::new(iced::Length::Fill, iced::Length::Fill).into()
+            iced::widget::Space::new().width(iced::Length::Fill).height(iced::Length::Fill).into()
         }
     }
 
@@ -2259,11 +2259,11 @@ impl Airterminal {
         iced::widget::center(
             column![
                 title,
-                iced::widget::Space::with_height(20),
+                iced::widget::Space::new().height(20),
                 subtitle,
-                iced::widget::Space::with_height(30),
+                iced::widget::Space::new().height(30),
                 account_button,
-                iced::widget::Space::with_height(15),
+                iced::widget::Space::new().height(15),
                 logout_button,
             ]
             .spacing(10)
@@ -2309,11 +2309,11 @@ impl Airterminal {
         iced::widget::center(
             column![
                 title,
-                iced::widget::Space::with_height(20),
+                iced::widget::Space::new().height(20),
                 subtitle,
-                iced::widget::Space::with_height(30),
+                iced::widget::Space::new().height(30),
                 subscription_button,
-                iced::widget::Space::with_height(10),
+                iced::widget::Space::new().height(10),
                 logout_button,
             ]
             .spacing(10)
@@ -2412,20 +2412,20 @@ impl Airterminal {
         
         let content = column![
             title,
-            iced::widget::Space::with_height(20),
+            iced::widget::Space::new().height(20),
             subtitle,
-            iced::widget::Space::with_height(20),
+            iced::widget::Space::new().height(20),
             explanation,
-            iced::widget::Space::with_height(25),
+            iced::widget::Space::new().height(25),
             solution_title,
-            iced::widget::Space::with_height(10),
+            iced::widget::Space::new().height(10),
             solution_points,
-            iced::widget::Space::with_height(20),
+            iced::widget::Space::new().height(20),
             technical_info,
-            iced::widget::Space::with_height(30),
+            iced::widget::Space::new().height(30),
             row![
                 support_button,
-                iced::widget::Space::with_width(10),
+                iced::widget::Space::new().width(10),
                 dismiss_button,
             ]
             .align_y(Alignment::Center),
@@ -2465,14 +2465,14 @@ impl Airterminal {
             ]
             .spacing(8)
                     .align_y(Alignment::Center),
-                    iced::widget::Space::with_height(6),
+                    iced::widget::Space::new().height(6),
                     container(
                         column![
                             // User ID row with copy button
                             row![
                                 text("User ID:").size(13).width(80),
                                 text(formatted_id).size(13),
-                                iced::widget::Space::with_width(iced::Length::Fill),
+                                iced::widget::Space::new().width(iced::Length::Fill),
                                 button(style::icon_text(Icon::Clone, 12))
                                     .on_press(Message::CopyToClipboard(user_id_string.clone()))
                                     .padding(4)
@@ -2549,7 +2549,7 @@ impl Airterminal {
                                         text("Days Remaining:").size(13).width(80),
                                         text(format!("{} days", days_remaining)).size(13),
                                     ].spacing(6).align_y(Alignment::Center),
-                                    iced::widget::Space::with_height(6),
+                                    iced::widget::Space::new().height(6),
                 button(
                     row![
                         style::icon_text(Icon::Star, 12),
@@ -2568,7 +2568,7 @@ impl Airterminal {
                                 return container(
                                     column![
                                         subscription_header,
-                                        iced::widget::Space::with_height(6),
+                                        iced::widget::Space::new().height(6),
                                         container(trial_content)
                                             .padding(10)
                                             .style(|theme: &iced::Theme| {
@@ -2583,7 +2583,7 @@ impl Airterminal {
                                                     ..Default::default()
                                                 }
                                             }),
-                                        iced::widget::Space::with_height(12),
+                                        iced::widget::Space::new().height(12),
                                         // Actions section for trial
                 button(
                     row![
@@ -2655,7 +2655,7 @@ impl Airterminal {
                     row![
                                 text("Subscription ID:").size(13).width(80),
                                 text(formatted_sub_id).size(13),
-                                iced::widget::Space::with_width(iced::Length::Fill),
+                                iced::widget::Space::new().width(iced::Length::Fill),
                                 button(style::icon_text(Icon::Clone, 12))
                                     .on_press(Message::CopyToClipboard(sub_id.clone()))
                                     .padding(4)
@@ -2676,7 +2676,7 @@ impl Airterminal {
                 
                     // Add upgrade button for non-pro users (but not for active trial, handled above)
                     if !self.is_pro && !matches!(self.trial_status, Some(TrialStatus::Active { .. })) {
-                        subscription_details = subscription_details.push(iced::widget::Space::with_height(6));
+                        subscription_details = subscription_details.push(iced::widget::Space::new().height(6));
                         subscription_details = subscription_details.push(
                             button(
                                 row![
@@ -2695,7 +2695,7 @@ impl Airterminal {
 
                     column![
                         subscription_header,
-                        iced::widget::Space::with_height(6),
+                        iced::widget::Space::new().height(6),
                         container(subscription_details.spacing(6))
                             .padding(10)
                             .style(|theme: &iced::Theme| {
@@ -2731,9 +2731,9 @@ impl Airterminal {
                 // Main content
                 let content = column![
                     user_header,
-                    iced::widget::Space::with_height(12),
+                    iced::widget::Space::new().height(12),
                     subscription_section,
-                    iced::widget::Space::with_height(12),
+                    iced::widget::Space::new().height(12),
                     actions_section,
                 ]
                 .spacing(4);
@@ -2749,7 +2749,7 @@ impl Airterminal {
                 // This shouldn't happen since the account button should only be visible when logged in
                 let content = column![
                     text("Not logged in").size(14),
-                    iced::widget::Space::with_height(8),
+                    iced::widget::Space::new().height(8),
                     button("Log in")
                         .padding(8)
                         .on_press(Message::LoginWithEmail(

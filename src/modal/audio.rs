@@ -6,8 +6,8 @@ use exchange::adapter::{Exchange, MarketKind, StreamKind};
 
 use exchange::Trade;
 use iced::widget::{button, column, container, row, text};
-use iced::widget::{checkbox, horizontal_space, pick_list, slider};
-use iced::{Element, padding};
+use iced::widget::{checkbox, pick_list, slider, Space};
+use iced::{Element, padding, Length};
 use std::collections::HashMap;
 
 const HARD_THRESHOLD: usize = 4;
@@ -159,7 +159,7 @@ impl AudioStream {
                             move |is_checked| Message::ToggleStream(is_checked, (exchange, ticker)),
                         );
 
-                    let mut stream_row = row![stream_checkbox, horizontal_space(),]
+                    let mut stream_row = row![stream_checkbox, Space::new().width(Length::Fill),]
                         .height(36)
                         .align_y(iced::Alignment::Center)
                         .padding(4)

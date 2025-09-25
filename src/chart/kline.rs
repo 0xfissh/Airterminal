@@ -276,10 +276,10 @@ impl KlineChart {
                             *indicator,
                             match indicator {
                                 KlineIndicator::Volume => {
-                                    // For Bybit and Hyperliquid adapters, show TOTAL volume for time-based charts
+                                    // For Bybit, Hyperliquid and OKX adapters, show TOTAL volume for time-based charts
                                     if let Some(info) = &ticker_info {
                                         let ex = info.exchange();
-                                        if matches!(ex, Exchange::BybitLinear | Exchange::BybitInverse | Exchange::BybitSpot | Exchange::HyperliquidPerps) {
+                                        if matches!(ex, Exchange::BybitLinear | Exchange::BybitInverse | Exchange::BybitSpot | Exchange::HyperliquidPerps | Exchange::OkxLinear | Exchange::OkxInverse | Exchange::OkxSpot) {
                                             // Convert split volumes to total using sentinel (-1.0, total)
                                             let total_map = timeseries
                                                 .volume_data()

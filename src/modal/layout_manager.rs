@@ -275,7 +275,7 @@ impl LayoutManager {
         };
 
         content = content.push(row![
-            Space::with_width(iced::Length::Fill),
+            Space::new().width(iced::Length::Fill),
             row![
                 tooltip(
                     button("i")

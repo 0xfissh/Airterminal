@@ -16,7 +16,7 @@ use super::{
     super::{
         Exchange, Kline, MarketKind, OpenInterest, StreamKind, Ticker, TickerInfo, TickerStats,
         Timeframe, Trade,
-        connect::{State, setup_tcp_connection, setup_tls_connection, setup_websocket_connection},
+        connect::{State, connect_ws},
         de_string_to_f32, de_string_to_u64,
         depth::{DepthPayload, DepthUpdate, LocalDepthCache, Order},
 
@@ -250,8 +250,6 @@ async fn connect(
     domain: &str,
     market_type: MarketKind,
 ) -> Result<FragmentCollector<TokioIo<Upgraded>>, StreamError> {
-    let tcp_stream = setup_tcp_connection(domain).await?;
-    let tls_stream = setup_tls_connection(domain, tcp_stream).await?;
     let url = format!(
         "wss://stream.bybit.com/v5/public/{}",
         match market_type {
@@ -260,7 +258,7 @@ async fn connect(
             MarketKind::InversePerps => "inverse",
         }
     );
-    setup_websocket_connection(domain, tls_stream, &url).await
+    connect_ws(domain, &url).await
 }
 
 async fn try_connect(
@@ -596,7 +594,7 @@ pub async fn fetch_historical_oi(
         url.push_str("&limit=200");
     }
 
-    let response_text = http_request_with_limiter(&url, &BYBIT_LIMITER, 1).await?;
+    let response_text = http_request_with_limiter(&url, &BYBIT_LIMITER, 1, None, None).await?;
 
     let content: Value = sonic_rs::from_str(&response_text).map_err(|e| {
         log::error!("Failed to parse JSON from {}: {}", url, e);
@@ -690,7 +688,7 @@ pub async fn fetch_klines(
         url.push_str(&format!("&limit={}", 200));
     }
 
-    let response_text = http_request_with_limiter(&url, &BYBIT_LIMITER, 1).await?;
+    let response_text = http_request_with_limiter(&url, &BYBIT_LIMITER, 1, None, None).await?;
 
     let value: ApiResponse =
         sonic_rs::from_str(&response_text).map_err(|e| StreamError::ParseError(e.to_string()))?;
@@ -749,7 +747,7 @@ pub async fn fetch_ticksize(
     let url =
         format!("https://api.bybit.com/v5/market/instruments-info?category={market}&limit=1000",);
 
-    let response_text = http_request_with_limiter(&url, &BYBIT_LIMITER, 1).await?;
+    let response_text = http_request_with_limiter(&url, &BYBIT_LIMITER, 1, None, None).await?;
 
     let exchange_info: Value =
         sonic_rs::from_str(&response_text).map_err(|e| StreamError::ParseError(e.to_string()))?;
@@ -827,7 +825,7 @@ pub async fn fetch_ticker_prices(
 
     let url = format!("https://api.bybit.com/v5/market/tickers?category={market}");
 
-    let response_text = http_request_with_limiter(&url, &BYBIT_LIMITER, 1).await?;
+    let response_text = http_request_with_limiter(&url, &BYBIT_LIMITER, 1, None, None).await?;
 
     let exchange_info: Value =
         sonic_rs::from_str(&response_text).map_err(|e| StreamError::ParseError(e.to_string()))?;

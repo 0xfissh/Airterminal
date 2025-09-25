@@ -1,6 +1,6 @@
 [package]
 name = "AirTerminal"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 categories = ["finance", "visualization", "gui"]
 
@@ -8,7 +8,7 @@ categories = ["finance", "visualization", "gui"]
 name = "AirTerminal"
 identifier = "com.airterminal.app"
 icon = ["icons/app_icon.icns"]
-version = "0.3.0"
+version = "0.4.0"
 category = "Finance"
 short_description = "High Frequency Analysis Platform"
 osx_url_schemes = ["airterminal"]
@@ -60,9 +60,9 @@ rustls = { version = "0.23", features = ["ring"] }
 
 exchange = { version = "0.1.0", path = "exchange" }
 data = { version = "0.1.0", path = "data" }
-supabase = { version = "0.3.0", path = "supabase" }
+supabase = { version = "0.4.0", path = "supabase" }
 
 [patch.crates-io]
-iced = { git = "https://github.com/iced-rs/iced", rev = "ad0e4c53cf5bcd02c110736853dac214ab35edb4" }
-iced_futures = { git = "https://github.com/iced-rs/iced", rev = "ad0e4c53cf5bcd02c110736853dac214ab35edb4" }
-iced_core = { git = "https://github.com/iced-rs/iced", rev = "ad0e4c53cf5bcd02c110736853dac214ab35edb4"}
+iced = { git = "https://github.com/iced-rs/iced", rev = "0a34496c793fd87c235e764317351a0aacd4f6d1" }
+iced_futures = { git = "https://github.com/iced-rs/iced", rev = "0a34496c793fd87c235e764317351a0aacd4f6d1" }
+iced_core = { git = "https://github.com/iced-rs/iced", rev = "0a34496c793fd87c235e764317351a0aacd4f6d1"}

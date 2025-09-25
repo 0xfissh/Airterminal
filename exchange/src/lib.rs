@@ -167,6 +167,9 @@ impl SerTicker {
             Exchange::BybitInverse => "BybitInverse",
             Exchange::BybitSpot => "BybitSpot",
             Exchange::HyperliquidPerps => "HyperliquidPerps",
+            Exchange::OkxLinear => "OkxLinear",
+            Exchange::OkxInverse => "OkxInverse",
+            Exchange::OkxSpot => "OkxSpot",
         }
     }
 
@@ -179,6 +182,9 @@ impl SerTicker {
             "BybitInverse" => Ok(Exchange::BybitInverse),
             "BybitSpot" => Ok(Exchange::BybitSpot),
             "HyperliquidPerps" => Ok(Exchange::HyperliquidPerps),
+            "OkxLinear" => Ok(Exchange::OkxLinear),
+            "OkxInverse" => Ok(Exchange::OkxInverse),
+            "OkxSpot" => Ok(Exchange::OkxSpot),
             _ => Err(format!("Unknown exchange: {}", s)),
         }
     }
@@ -288,24 +294,18 @@ impl Ticker {
     }
 
     pub fn display_symbol_and_type(&self) -> (String, MarketKind) {
-        let mut result = String::with_capacity(self.len as usize);
+        let (full_symbol, market) = self.to_full_symbol_and_type();
+        let mut parts: Vec<&str> = full_symbol.split('_').collect();
 
-        for i in 0..self.len {
-            let value = (self.data[i as usize / 10] >> ((i % 10) * 6)) & 0x3F;
-
-            if value == 36 {
-                break;
+        if let Some(last) = parts.last() {
+            if last.eq_ignore_ascii_case("SWAP") {
+                parts.pop();
             }
-
-            let c = match value {
-                0..=9 => (b'0' + value as u8) as char,
-                10..=35 => (b'A' + (value as u8 - 10)) as char,
-                _ => unreachable!(),
-            };
-            result.push(c);
         }
 
-        (result, self.market_type())
+        let display_symbol = parts.join("");
+
+        (display_symbol, market)
     }
 
     pub fn market_type(&self) -> MarketKind {
