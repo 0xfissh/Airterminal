@@ -1,6 +1,6 @@
 [package]
 name = "AirTerminal"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 categories = ["finance", "visualization", "gui"]
 
@@ -60,7 +60,7 @@ rustls = { version = "0.23", features = ["ring"] }
 
 exchange = { version = "0.1.0", path = "exchange" }
 data = { version = "0.1.0", path = "data" }
-supabase = { version = "0.3.0", path = "supabase" }
+supabase = { version = "0.4.0", path = "supabase" }
 
 [patch.crates-io]
 iced = { git = "https://github.com/iced-rs/iced", rev = "0a34496c793fd87c235e764317351a0aacd4f6d1" }
