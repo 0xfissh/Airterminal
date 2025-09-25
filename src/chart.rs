@@ -5,13 +5,13 @@ mod scale;
 
 use iced::theme::palette::Extended;
 use iced::widget::canvas::{self, Cache, Canvas, Event, Frame, LineDash, Stroke};
-use iced::widget::{center, horizontal_rule, mouse_area, vertical_rule};
+use iced::widget::{center, mouse_area, Space};
 use iced::{
     Element, Length, Point, Rectangle, Size, Theme, Vector, alignment,
     keyboard, mouse::{self},
     padding,
     widget::{
-        Space, button, canvas::Path, column, container, row, text,
+        button, canvas::Path, column, container, row, text,
         tooltip::Position as TooltipPosition,
     },
 };
@@ -597,7 +597,7 @@ pub fn view<'a, T: Chart>(
 
         container(
             row![
-                Space::new(Length::Fill, Length::Fill),
+                Space::new().width(Length::Fill).height(Length::Fill),
                 tooltip(center_button, Some(autoscale_tooltip), TooltipPosition::Top),
                 tooltip(crosshair_button, Some("Crosshair"), TooltipPosition::Top),
             ]
@@ -627,7 +627,7 @@ pub fn view<'a, T: Chart>(
             container(Canvas::new(chart).width(Length::Fill).height(Length::Fill))
                 .width(Length::FillPortion(10))
                 .height(Length::FillPortion(120)),
-            vertical_rule(1).style(style::split_ruler),
+            container(Space::new().width(1).height(Length::Fill)).style(style::split_ruler_container),
             container(
                 mouse_area(axis_labels_y)
                     .on_double_click(Message::DoubleClick(AxisScaleClicked::Y))
@@ -669,7 +669,7 @@ pub fn view<'a, T: Chart>(
 
     column![
         chart_content,
-        horizontal_rule(1).style(style::split_ruler),
+        container(Space::new().width(Length::Fill).height(1)).style(style::split_ruler_container),
         row![
             container(
                 mouse_area(axis_labels_x)

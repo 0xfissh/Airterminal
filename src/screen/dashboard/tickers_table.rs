@@ -11,7 +11,7 @@ use iced::{
     alignment::{Horizontal, Vertical},
     padding,
     widget::{
-        Button, Space, Text, button, column, container, horizontal_rule, row,
+        Button, Space, Text, button, column, container, row,
         scrollable::{self, AbsoluteOffset},
         text, text_input,
     },
@@ -969,7 +969,7 @@ impl TickersTable {
                 .style(|theme, status| style::button::transparent(theme, status, false));
 
             let volume_content = row![
-                Space::new(Length::Fill, Length::Shrink),
+                Space::new().width(Length::Fill).height(Length::Shrink),
                 row![
                     text("Volume").align_x(Horizontal::Center),
                     icon_text(
@@ -979,7 +979,7 @@ impl TickersTable {
                 ]
                 .spacing(6)
                 .align_y(Vertical::Center),
-                Space::new(Length::Fill, Length::Shrink),
+                Space::new().width(Length::Fill).height(Length::Shrink),
             ];
 
             let volume_sort_button = button(volume_content)
@@ -988,7 +988,7 @@ impl TickersTable {
             .height(Length::Fixed(32.0));
 
             let change_content = row![
-                Space::new(Length::Fill, Length::Shrink),
+                Space::new().width(Length::Fill).height(Length::Shrink),
                 row![
                     text("Change").align_x(Horizontal::Center),
                     icon_text(
@@ -998,7 +998,7 @@ impl TickersTable {
                 ]
                 .spacing(6)
                 .align_y(Vertical::Center),
-                Space::new(Length::Fill, Length::Shrink),
+                Space::new().width(Length::Fill).height(Length::Shrink),
             ];
 
             let change_sort_button = button(change_content)
@@ -1082,7 +1082,7 @@ impl TickersTable {
                 } else {
                     row![]
                 },
-                horizontal_rule(1.0).style(style::split_ruler),
+                container(Space::new().width(Length::Fill).height(1.0)).style(style::split_ruler_container),
             ]
             .spacing(4)
         };
@@ -1218,7 +1218,7 @@ fn create_ticker_card_with_focus(
                 let (icon, size) = style::exchange_icon_with_size(exchange);
                 icon_text(icon, size)
             },
-            Space::new(Length::Fixed(6.0), Length::Shrink),
+            Space::new().width(Length::Fixed(6.0)).height(Length::Shrink),
             text(display_data.display_ticker.clone()).style(move |theme: &Theme| {
                 // Contrast-safe color: blend from the theme's base text color toward success/danger
                 // based on daily change magnitude. This ensures readability on light/dark themes.
@@ -1251,7 +1251,7 @@ fn create_ticker_card_with_focus(
                 st.color = Some(color);
                 st
             }),
-            Space::new(Length::Fill, Length::Shrink),
+            Space::new().width(Length::Fill).height(Length::Shrink),
             text(display_data.volume_display.clone()),
         ]
         .align_y(Alignment::Center)
@@ -1278,7 +1278,7 @@ fn create_ticker_card_with_focus(
     container(
         row![
             left_click_area.width(Length::Fill),
-            Space::new(Length::Fixed(0.0), Length::Shrink),
+            Space::new().width(Length::Fixed(0.0)).height(Length::Shrink),
             fav_button,
         ]
         .align_y(Alignment::Center)
@@ -1405,7 +1405,7 @@ fn create_expanded_ticker_card(
             icon_text(icon, size)
         },
         text(format!("{} {}{}", ticker_str, market.to_string(), match market { MarketKind::Spot => "", MarketKind::LinearPerps | MarketKind::InversePerps => " Perp" })).size(14),
-        Space::new(Length::Fill, Length::Shrink),
+        Space::new().width(Length::Fill).height(Length::Shrink),
         button(icon_text(Icon::Link, 12))
             .on_press(Message::TickerSelected(*ticker, exchange, "link_group".to_string()))
             .style(|theme, status| style::button::transparent(theme, status, false)),
@@ -1417,17 +1417,17 @@ fn create_expanded_ticker_card(
     let stats = column![
         row![
             text("Last Updated Price:").size(11),
-            Space::new(Length::Fill, Length::Shrink),
+            Space::new().width(Length::Fill).height(Length::Shrink),
             text(display_data.mark_price_display.clone()).size(12),
         ],
         row![
             text("Daily Change:").size(11),
-            Space::new(Length::Fill, Length::Shrink),
+            Space::new().width(Length::Fill).height(Length::Shrink),
             text(display_data.price_change_display.clone()).style(change_style).size(12),
         ],
         row![
             text("Daily Volume:").size(11),
-            Space::new(Length::Fill, Length::Shrink),
+            Space::new().width(Length::Fill).height(Length::Shrink),
             text(display_data.volume_display.clone()).size(12),
         ],
     ]
@@ -1446,7 +1446,7 @@ fn create_expanded_ticker_card(
 
     column![
         header,
-        Space::new(Length::Shrink, Length::Fixed(6.0)),
+        Space::new().width(Length::Shrink).height(Length::Fixed(6.0)),
         container(stats).style(|theme: &Theme| {
             let palette = theme.extended_palette();
             iced::widget::container::Style {
@@ -1454,7 +1454,7 @@ fn create_expanded_ticker_card(
                 ..Default::default()
             }
         }),
-        Space::new(Length::Shrink, Length::Fixed(6.0)),
+        Space::new().width(Length::Shrink).height(Length::Fixed(6.0)),
         chart_buttons,
     ]
     .padding(padding::top(8).right(12).left(12).bottom(12))

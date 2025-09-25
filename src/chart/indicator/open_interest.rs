@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use iced::widget::canvas::{self, Cache, Event, Geometry, Path, Stroke};
-use iced::widget::{Canvas, center, container, row, text, vertical_rule};
+use iced::widget::{Canvas, center, container, row, text, Space};
 use iced::{Element, Length, Point, Rectangle, Renderer, Size, Theme, Vector, mouse};
 
 use crate::chart::{Basis, Caches, ViewState, Interaction, Message};
@@ -66,7 +66,7 @@ pub fn indicator_elem<'a>(
 
     row![
         indi_chart,
-        vertical_rule(1).style(style::split_ruler),
+        container(Space::new().width(1).height(Length::Fill)).style(style::split_ruler_container),
         container(indi_labels),
     ]
     .into()

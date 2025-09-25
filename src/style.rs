@@ -582,14 +582,15 @@ pub fn scroll_bar(theme: &Theme, status: widget::scrollable::Status) -> widget::
 }
 
 // custom widgets
-pub fn split_ruler(theme: &Theme) -> iced::widget::rule::Style {
+pub fn split_ruler_container(theme: &Theme) -> iced::widget::container::Style {
     let palette = theme.extended_palette();
 
-    iced::widget::rule::Style {
-        color: palette.background.strong.color.scale_alpha(0.25),
-        radius: iced::border::Radius::default(),
-        fill_mode: iced::widget::rule::FillMode::Full,
-        snap: true,
+    iced::widget::container::Style {
+        background: Some(iced::Background::Color(palette.background.strong.color.scale_alpha(0.25))),
+        border: iced::Border::default(),
+        shadow: Default::default(),
+        snap: false,
+        text_color: None,
     }
 }
 

@@ -262,7 +262,8 @@ impl Exchange {
             Exchange::BinanceInverse | Exchange::BybitInverse => MarketKind::InversePerps,
             Exchange::BinanceSpot | Exchange::BybitSpot => MarketKind::Spot,
             Exchange::HyperliquidPerps => MarketKind::LinearPerps,
-            Exchange::OkxLinear | Exchange::OkxInverse => MarketKind::InversePerps,
+            Exchange::OkxLinear => MarketKind::LinearPerps,
+            Exchange::OkxInverse => MarketKind::InversePerps,
             Exchange::OkxSpot => MarketKind::Spot,
         }
     }
@@ -375,10 +376,7 @@ pub async fn fetch_open_interest(
             hyperliquid::fetch_historical_oi(ticker, range, timeframe).await
         }
         Exchange::OkxLinear | Exchange::OkxInverse => {
-            okx::fetch_historical_oi(ticker, range, timeframe).await
-        }
-        Exchange::OkxSpot => {
-            okx::fetch_historical_oi(ticker, range, timeframe).await
+            Err(StreamError::InvalidRequest("Open interest not supported for OKX".to_string()))
         }
         _ => Err(StreamError::InvalidRequest("Invalid exchange".to_string())),
     }

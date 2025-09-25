@@ -81,10 +81,10 @@ impl HistoricalDepth {
     pub fn new(min_order_qty: f32, tick_size: f32, basis: Basis) -> Self {
         Self {
             price_levels: BTreeMap::new(),
-            aggr_time: match basis {
-                Basis::Time(interval) => interval,
-                Basis::Tick(_) => unimplemented!(),
-            },
+        aggr_time: match basis {
+            Basis::Time(interval) => interval,
+            Basis::Tick(_) => 1000, // Default to 1 second for tick-based aggregation
+        },
             tick_size,
             min_order_qty,
         }

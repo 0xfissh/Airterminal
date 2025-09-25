@@ -134,7 +134,7 @@ impl Sidebar {
         column![
             layout_modal_button,
             audio_btn,
-            Space::with_height(Length::Fill),
+            Space::new().height(Length::Fill),
             account_button,
             settings_modal_button,
         ]

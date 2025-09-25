@@ -28,6 +28,7 @@ use iced::{
     widget::{
         PaneGrid, center, container, mouse_area, opaque, responsive,
         pane_grid::{self, Configuration},
+        operation::focus,
     },
 };
 use iced_futures::futures::TryFutureExt;
@@ -284,7 +285,7 @@ impl Dashboard {
 
                             // Focus search when opening
                             if !should_close {
-                                let focus_task = iced::widget::text_input::focus("ticker_search")
+                                let focus_task = focus("ticker_search")
                                     .map(|_m: tickers_table::Message| Message::RefreshStreams);
                                 return (
                                     Task::done(Message::Pane(window, msg)).chain(focus_task),
@@ -570,7 +571,7 @@ impl Dashboard {
                                 if let Some(ps) = self.get_mut_pane(main_window.id, window, pane) {
                                     ps.modal = Some(pane::Modal::TickerBrowser);
                                 }
-                                let focus_task = iced::widget::text_input::focus("ticker_search")
+                                let focus_task = focus("ticker_search")
                                     .map(|_m: tickers_table::Message| Message::RefreshStreams);
                                 return (
                                     task.map(move |m| Message::Pane(window, pane::Message::TickerBrowser(target_pane, m)))
@@ -581,7 +582,7 @@ impl Dashboard {
                                 if let Some(ps) = self.get_mut_pane(main_window.id, window, pane) {
                                     ps.modal = Some(pane::Modal::TickerBrowser);
                                 }
-                                let focus_task = iced::widget::text_input::focus("ticker_search")
+                                let focus_task = focus("ticker_search")
                                     .map(|_m: tickers_table::Message| Message::RefreshStreams);
                                 return (focus_task, None);
                             }

@@ -11,7 +11,7 @@ use data::util::format_with_commas;
 use iced::{
     Alignment, Element, Length,
     widget::{
-        button, column, container, horizontal_rule, horizontal_space, pane_grid, pick_list, radio,
+        button, column, container, pane_grid, pick_list, radio, Space,
         row, slider, text, tooltip::Position as TooltipPosition,
     },
 };
@@ -213,7 +213,7 @@ pub fn heatmap_cfg_view<'a>(cfg: heatmap::Config, pane: pane_grid::Pane) -> Elem
                         }),
                     )
                 }),
-            horizontal_space(),
+            Space::new().width(Length::Fill),
             button(style::icon_text(style::Icon::Cog, 12))
                 .on_press(Message::VisualConfigChanged(
                     Some(pane),
@@ -265,7 +265,7 @@ pub fn heatmap_cfg_view<'a>(cfg: heatmap::Config, pane: pane_grid::Pane) -> Elem
             .spacing(14)
             .padding(10)
             .align_x(Alignment::Start),
-            horizontal_rule(1).style(style::split_ruler),
+            container(Space::new().width(Length::Fill).height(1)).style(style::split_ruler_container),
             column![
                 text("Noise filters").size(14),
                 iced::widget::checkbox(
@@ -290,7 +290,7 @@ pub fn heatmap_cfg_view<'a>(cfg: heatmap::Config, pane: pane_grid::Pane) -> Elem
             .spacing(14)
             .padding(10)
             .align_x(Alignment::Start),
-            horizontal_rule(1).style(style::split_ruler),
+            container(Space::new().width(Length::Fill).height(1)).style(style::split_ruler_container),
             column![
                 text("Trade visualization").size(14),
                 tooltip_section,
@@ -299,9 +299,9 @@ pub fn heatmap_cfg_view<'a>(cfg: heatmap::Config, pane: pane_grid::Pane) -> Elem
             .padding(10)
             .width(Length::Fill)
             .align_x(Alignment::Start),
-            horizontal_rule(1).style(style::split_ruler),
+            container(Space::new().width(Length::Fill).height(1)).style(style::split_ruler_container),
             row![
-                horizontal_space(),
+                Space::new().width(Length::Fill),
                 sync_all_button(VisualConfig::Heatmap(cfg))
             ],
         ]
@@ -427,7 +427,7 @@ pub fn timesales_cfg_view<'a>(
                         Some("Amount of trades will be stored before cleanup."),
                         TooltipPosition::Right,
                     ),
-                    horizontal_space(),
+                    Space::new().width(Length::Fill),
                 ]
                 .align_y(Alignment::Center),
                 buffer_size_slider,
@@ -448,7 +448,7 @@ pub fn timesales_cfg_view<'a>(
                 .padding(10)
                 .align_x(Alignment::Center),
             row![
-                horizontal_space(),
+                Space::new().width(Length::Fill),
                 sync_all_button(VisualConfig::TimeAndSales(cfg))
             ],
         ]
@@ -518,10 +518,10 @@ pub fn kline_cfg_view<'a>(
 pub mod study {
     use crate::style::{self, Icon, icon_text};
     use data::chart::kline::FootprintStudy;
-    use iced::{
-        Element, padding,
-        widget::{button, column, container, horizontal_rule, horizontal_space, row, slider, text},
-    };
+use iced::{
+    Element, padding, Length,
+        widget::{button, column, container, row, slider, text, Space},
+};
 
     #[derive(Debug, Clone, Copy)]
     pub enum Message {
@@ -606,7 +606,7 @@ pub mod study {
             let checkbox = iced::widget::checkbox(study.to_string(), is_selected)
                 .on_toggle(move |checked| Message::StudyToggled(study, checked));
 
-            let mut checkbox_row = row![checkbox, horizontal_space()]
+            let mut checkbox_row = row![checkbox, Space::new().width(Length::Fill)]
                 .height(36)
                 .align_y(iced::Alignment::Center)
                 .padding(4)
@@ -735,9 +735,9 @@ pub mod study {
                         column = column.push(
                             column![
                                 qty_threshold,
-                                horizontal_rule(1).style(style::split_ruler),
+                                container(Space::new().width(Length::Fill).height(1)).style(style::split_ruler_container),
                                 color_scaling,
-                                horizontal_rule(1).style(style::split_ruler),
+                                container(Space::new().width(Length::Fill).height(1)).style(style::split_ruler_container),
                                 ignore_zeros_checkbox,
                             ]
                             .padding(8)

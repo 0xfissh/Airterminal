@@ -265,7 +265,7 @@ impl HeatmapChart {
 
         let aggregate_time: u64 = match chart.basis {
             Basis::Time(interval) => interval,
-            Basis::Tick(_) => todo!(),
+            Basis::Tick(_) => 1000, // Default to 1 second for tick-based aggregation
         };
 
         let rounded_depth_update = (depth_update / aggregate_time) * aggregate_time;
